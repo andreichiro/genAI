@@ -1,24 +1,3 @@
-# Project Overview & Replication Guide  
-
-## 1 . Quick start — zero-click reproduction
-
-```bash
-git clone <repo-url>
-cd <repo>
-python -m venv .venv && source .venv/bin/activate       # optional but recommended
-pip install -r requirements.txt                         # pandas, numpy, matplotlib, etc.
-
-# 🔁 Run the entire pipeline (≈ 1–2 min on a laptop)
-make reproduce              # or:  python replicate.py --jobs 4
-
-## **genAI.py deep dive**
-
-### **`compute_y_romer(…)`**
-
-This single routine can reproduce all of the model variants described, from a textbook Romer to AI-augmented versions with stochastic noise, adaptive time-steps, logistic intangible spill-overs and dynamic capital deepening.
-
----
-
 ### **1\. Core objective**
 
 For each discrete period **t \= 0 … num\_periods – 1** it computes
