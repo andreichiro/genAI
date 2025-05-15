@@ -1,0 +1,126 @@
+# scenarios.yaml  
+# master configuration
+
+defaults:
+  num_periods:               50        # simulation horizon
+  alpha:                      0.33      # Cobb-Douglas exponent
+  dt_integration:             1.0
+  growth_explosion_threshold: 1e12      # early-abort cap
+  invest_rate_base:           0.02     # base reinvest-rate used in boom–bust
+  intangible_trickle:         0.01     # small constant intangible spend
+  intangible_kappa: 1.0
+  intangible_Ubar: 5.0
+  intangible_epsilon: 0.5
+  # if true → intangible(t) simply mirrors synergy(t)
+  intangible_mirror:        true
+  # set >0 to enable the skill-interaction channel
+  skill_interaction_strength: 0.0
+
+scenarios:
+  # exemplar quartet 
+  - id: top-smooth-boom-prod-early      # ← scenario ID (free text)
+    archetype:           top
+    threshold:           smooth        # smooth | cliff
+    investment_path:     boom_bust     # boom_bust | steady
+    labor_split:         production_heavy  # production_heavy | rd_heavy
+    shock_timing:        early         # early | late | none
+    x_updater:           knowledge_scaled  # symmetric | knowledge_scaled | frozen
+    params:                           # ← *only* place with numbers
+      threshold:   {t_star: 10, width: 4,  height: 1.0}
+      boom_bust:   {amplitude: 0.12, bust_after: 12}
+      labor:       {rd_share_high: 0.15, rd_share_low: 0.05}
+      shock:       {drop_pct: 0.30, start_year: 15, duration: 5}
+
+  - id: top-cliff-steady-prod-early
+    archetype: top
+    threshold: cliff
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: early
+    x_updater: knowledge_scaled
+    params:
+      threshold: {t_star: 10, height: 1.0}
+      steady:    {invest_rate: 0.08}
+      labor:     {rd_share_high: 0.15, rd_share_low: 0.05}
+      shock:     {drop_pct: 0.30, start_year: 15, duration: 5}
+
+  - id: intermediate-smooth-steady-rd-late
+    archetype: intermediate
+    threshold: smooth
+    investment_path: steady
+    labor_split: rd_heavy
+    shock_timing: late
+    x_updater: symmetric
+    params:
+      threshold: {t_star: 14, width: 6,  height: 0.8}
+      steady:    {invest_rate: 0.06}
+      labor:     {rd_share_high: 0.30, rd_share_low: 0.10}
+      shock:     {drop_pct: 0.20, start_year: 30, duration: 5}
+
+  - id: bottom-cliff-boom-prod-none
+    archetype: bottom
+    threshold: cliff
+    investment_path: boom_bust
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: frozen
+    params:
+      threshold: {t_star: 18, height: 0.4}
+      boom_bust: {amplitude: 0.05, bust_after: 8}
+      labor:     {rd_share_high: 0.05, rd_share_low: 0.02}
+# Add more scenarios by appending to the list above – no Python changes
+
+#How the file is organised
+#defaults: block – global parameters that apply to every scenario unless you override them locally.
+#Examples: the simulation horizon (num_periods), the production-function exponent (alpha), Euler step size (dt_integration), and safety caps such as growth_explosion_threshold.
+
+#scenarios: list – each list item defines one scenario.
+#You give it an id (any string) and specify qualitative “axes” that pick which helper functions Phase A will wire together:
+
+#archetype  — semantic label like top, intermediate, bottom (only used for grouping in plots).
+
+#threshold — cliff or smooth shape for the synergy curve.
+
+#investment_path — boom_bust (high cap-ex then crash) or steady (constant reinvestment).
+
+#labor_split — production_heavy (R&D share rises after the threshold) or rd_heavy (starts high then falls).
+
+#shock_timing — early, late or none labour shock.
+
+#x_updater — how to allocate intermediate goods (symmetric, knowledge_scaled, frozen).
+
+#Beneath each scenario you get a params: subsection.
+#That is the only place you are allowed to write numbers.
+#Sub-dictionaries mirror the names used by the code helpers – for instance:
+
+#threshold: holds t_star, width, height.
+
+#boom_bust: has amplitude and bust_after.
+
+#steady: just needs an invest_rate.
+
+#labor: provides two R&D-share levels (rd_share_high, rd_share_low).
+
+#shock: defines drop_pct, start_year, duration.
+
+#What each default does
+#invest_rate_base – the baseline fraction of output reinvested into physical capital during a boom-bust.
+
+#intangible_trickle – a small fixed intangible investment for the steady path.
+
+#intangible_kappa, intangible_Ubar, intangible_epsilon – parameters for the logistic uplift that intangibles can add to output.
+
+#intangible_mirror – true means the intangible curve simply re-uses the synergy curve; set false if you want to decouple them.
+
+#skill_interaction_strength – put a positive number here to activate the optional three-way interaction channel in Phase G (skills × synergy × intangibles).
+
+#If a scenario needs a different value it overrides the default by repeating the key inside its own params: block.
+
+#Adding or editing scenarios
+#Copy-paste any existing list item under scenarios:.
+
+#Give it a new id:.
+
+#Adjust the qualitative axis flags and the numeric params:.
+
+#Save. No Python files need recompiling – sim_runner.py will automatically discover the new scenario.

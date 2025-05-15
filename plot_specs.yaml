@@ -1,0 +1,24 @@
+# plot_specs.yaml
+
+# Declarative mapping: metric → plotting options.
+# Add/remove metrics here without touching Python.
+
+Y_new:
+  title: "Aggregate Output Yₜ"
+  ylabel: "Y (output)"
+  log_y: true
+
+y_growth_pct:
+  title: "Year-on-Year Growth Rate of Y"
+  ylabel: "ΔY / Yₜ₋₁"
+  log_y: false
+
+capital_intensity:
+  title: "Capital Intensity (K / Lᴾ)"
+  ylabel: "Capital intensity"
+  log_y: false
+
+rd_share:
+  title: "R&D Share of Labour"
+  ylabel: "Lᴿᴰ / (Lᴿᴰ + Lᴾ)"
+  log_y: false
