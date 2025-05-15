@@ -1,5 +1,7 @@
 ### **1\. Core objective**
 
+This single routine can reproduce all of the model variants described, from a textbook Romer to AI-augmented versions with stochastic noise, adaptive time-steps, logistic intangible spill-overs and dynamic capital deepening.
+
 For each discrete period **t \= 0 … num\_periods – 1** it computes
 
 `Y_new(t) = [L_Y(t)]^(1-α) · Σ_i x_i(t)^α   with   0 < α < 1`
