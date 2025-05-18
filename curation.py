@@ -24,12 +24,15 @@ _DERIVED_COLS: Final = [
     "y_growth_pct",
     "mean_latency",
     "p95_latency",
+    "max_latency",  
+    "std_latency", 
     "creativity_loss",
     "triage_eff",
     "ROI_skill",
     "congestion_idx",
     "market_share",
     "Y_lost_decay",
+    "y_new_tot",
     "sgna_cost",
 ]
 
@@ -102,7 +105,12 @@ def _add_queue_kpis(
     """
     # make sure every column is present 
     for col in ("mean_latency", "p95_latency",
-                "creativity_loss", "triage_eff", "ROI_skill"):
+            "max_latency",  "std_latency",         
+            "creativity_loss", "triage_eff", "ROI_skill"):
+    
+        df[col] = df[f"{col}_new"].combine_first(df[col])
+        df.drop(columns=[f"{col}_new"], inplace=True)
+        
         if col not in df.columns:
             df[col] = np.nan
 
@@ -118,9 +126,12 @@ def _add_queue_kpis(
 
         grp   = log_df.groupby(["scenario_id", "t_eval"])["lat"]
         stats = grp.agg(
-            mean_latency="mean",
-            p95_latency=lambda s: np.percentile(s, 95),
-        ).reset_index().rename(columns={"t_eval": "t"})
+            mean_latency = "mean",
+            p95_latency  = lambda s: np.percentile(s, 95),
+            max_latency  = "max",
+            std_latency  = "std",
+        )
+
 
         # Outer-merge and coalesce with any pre-existing values
         df = df.merge(stats, how="left",
@@ -142,9 +153,9 @@ def _add_market_and_decay(df: pd.DataFrame) -> pd.DataFrame:
     """
     # Market share 
     df["market_share"] = (
-        df.groupby("t")["Y_new"]
-          .transform(lambda col: col / col.sum() if col.sum() > 0 else np.nan)
-          .astype("float64")
+        df.groupby(["scenario_id", "t"])["Y_new"]
+        .transform(lambda col: col / col.sum() if col.sum() else np.nan)
+        .astype("float64")
     )
 
     # Latency-decay loss 
@@ -154,6 +165,14 @@ def _add_market_and_decay(df: pd.DataFrame) -> pd.DataFrame:
         (df["Y_new_nominal"] - df["Y_new"])
         .clip(lower=0)
         .astype("float64")
+    )
+    return df
+
+def _add_tot_output(df: pd.DataFrame) -> pd.DataFrame:
+    df["y_new_tot"] = (
+        df.groupby(["scenario_id", "t"])["Y_new"]
+          .transform("sum")
+          .astype("float64")
     )
     return df
 
@@ -183,7 +202,8 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
             .pipe(_add_growth)
             .pipe(_add_queue_kpis)
             .pipe(_add_market_and_decay)
-            .pipe(_sgna_merge)            # always defined by the try/except
+            .pipe(_sgna_merge)    
+            .pipe(_add_tot_output)        # always defined by the try/except
     )
 
 

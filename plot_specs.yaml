@@ -62,3 +62,8 @@ std_latency:
   title: "Latency Std-Dev"
   ylabel: "Std latency (periods)"
   log_y: false
+
+y_new_tot:
+  title: "Aggregate Output Yₜ"
+  ylabel: "Y (output)"
+  log_y: true      # keep log-scale

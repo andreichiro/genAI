@@ -47,6 +47,23 @@ _DIR_PNG   = Path(_PATHS.get("fig_png",  _DEFAULTS["fig_png"])).resolve()   # �
 _DIR_HTML  = Path(_PATHS.get("fig_html", _DEFAULTS["fig_html"])).resolve()  # ← [NEW]
 _PLOT_SPECS = _ROOT / "plot_specs.yaml"                                      # (unchanged)  # ← [CHG]
 
+def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
+    """
+    Return a wide dataframe indexed by t and with one column per series:
+      • most metrics → scenario-level line (columns=scenario_id)
+      • market_share → scenario+firm lines (columns=scenario|firm)
+    """
+    if metric == "market_share":
+        cols = ["scenario_id", "firm_id"]
+        col_name = df[cols].astype(str).agg(" – ".join, axis=1)
+    else:
+        col_name = df["scenario_id"]
+
+    wide = (df.assign(_col=col_name)
+              .pivot_table(index="t", columns="_col", values=metric,
+                           aggfunc="mean")     # duplicates averaged
+              .sort_index())
+    return wide
 
 def _load_specs() -> dict:
     specs = yaml.safe_load(_PLOT_SPECS.read_text())
@@ -83,6 +100,27 @@ def _interactive_lineplot(df: pd.DataFrame, metric: str, spec: dict, out_html: P
     fig.write_html(out_html, include_plotlyjs="cdn")
 
 
+def _draw(metric: str, spec: dict, wide: pd.DataFrame,
+          out_png: Path, out_html: Path) -> None:
+
+    # -------- Matplotlib
+    ax = wide.plot(figsize=(6,3), lw=1.5, marker="o")
+    ax.set_title(spec.get("title", metric))
+    ax.set_xlabel("Year t")
+    ax.set_ylabel(spec.get("ylabel", metric))
+    if spec.get("log_y"): ax.set_yscale("log")
+    ax.legend(fontsize="x-small", ncol=2, loc="best")
+    ax.figure.tight_layout()
+    ax.figure.savefig(out_png, dpi=300)
+    _plt.close(ax.figure)
+
+    # -------- Plotly
+    fig = _px.line(wide, labels={"value": spec.get("ylabel", metric),
+                                 "t": "Year t"},
+                   title=spec.get("title", metric),
+                   log_y=bool(spec.get("log_y", False)))
+    fig.write_html(out_html, include_plotlyjs="cdn")
+
 def render_all() -> None:
     """
     Main orchestration: validate data, then loop over every metric defined
@@ -100,15 +138,22 @@ def render_all() -> None:
     _DIR_HTML.mkdir(exist_ok=True, parents=True)
 
     for metric, spec in tqdm(specs.items(), desc="plots"):
-        if metric not in df.columns:
-            _LOG.warning("Metric '%s' not in curated dataset — skipped.", metric)
+        # 1️⃣  availability check
+        if metric not in df.columns or df[metric].isna().all():
+            _LOG.warning("Metric '%s' missing or all-NaN – skipped.", metric)
             continue
 
-        png_path = _DIR_PNG / f"{metric}.png"
-        html_path = _DIR_HTML / f"{metric}.html"
+        # 2️⃣  reshape to wide format (handles firm-level vs scenario-level)
+        wide = _pivot(df, metric).dropna(how="all")
+        if wide.empty:
+            _LOG.warning("Metric '%s' has no finite data – skipped.", metric)
+            continue
 
-        _static_lineplot(df, metric, spec, png_path)        # <- NEW helper
-        _interactive_lineplot(df, metric, spec, html_path)  # <- NEW helper
+        # 3️⃣  render static PNG + interactive HTML in one call
+        _draw(metric, spec, wide,
+              _DIR_PNG  / f"{metric}.png",
+              _DIR_HTML / f"{metric}.html")
+
     _LOG.info("Phase D finished ✓")
 
 
