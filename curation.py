@@ -30,6 +30,7 @@ _DERIVED_COLS: Final = [
     "triage_eff",
     "ROI_skill",
     "congestion_idx",
+    "congestion_idx_mean",
     "market_share",
     "Y_lost_decay",
     "y_new_tot",
@@ -126,7 +127,7 @@ def _add_queue_kpis(
             grp.agg(
                 mean_latency="mean",
                 p95_latency=lambda s: np.percentile(s, 95),
-                max_latency="max",
+                max_latency=lambda s: np.percentile(s, 99),
                 std_latency="std",
             )
             .reset_index()
@@ -145,9 +146,12 @@ def _add_queue_kpis(
         # Outer-merge and coalesce with any pre-existing values
         df = df.merge(stats, how="left", on=["scenario_id", "t"])
         for col in ("mean_latency", "p95_latency",  
-                    "max_latency", "std_latency"):            
-            df[col] = df[f"{col}_new"].combine_first(df[col])
-            df.drop(columns=[f"{col}_new"], inplace=True, errors="ignore")
+                    "max_latency", "std_latency"):       
+                         
+            if col not in df.columns:
+                df[col] = np.nan
+
+
     return df
 
 def _add_market_and_decay(df: pd.DataFrame) -> pd.DataFrame:
@@ -180,6 +184,16 @@ def _add_tot_output(df: pd.DataFrame) -> pd.DataFrame:
           .transform("sum")
           .astype("float64")
     )
+
+    # scenario-level mean congestion 
+    cong = (
+        df.groupby(["scenario_id", "t"])["congestion_idx"]
+          .mean()
+          .rename("congestion_idx_mean")
+          .reset_index()
+    )
+    df = df.merge(cong, on=["scenario_id", "t"], how="left")
+
     return df
 
 def curate(parquet_path: str = "outputs/simulations.parquet") -> None:

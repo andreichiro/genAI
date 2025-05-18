@@ -105,7 +105,8 @@ def _draw(metric: str, spec: dict, wide: pd.DataFrame,
           out_png: Path, out_html: Path) -> None:
 
     # -------- Matplotlib
-    ax = wide.plot(figsize=(6,3), lw=1.5, marker="o")
+    _palette = _plt.cm.get_cmap("tab20").colors
+    ax = wide.plot(figsize=(6,3), lw=1.5, marker="o", color=_palette)
     ax.set_title(spec.get("title", metric))
     ax.set_xlabel("Year t")
     ax.set_ylabel(spec.get("ylabel", metric))

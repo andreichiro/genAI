@@ -3,10 +3,7 @@
 # Declarative mapping: metric → plotting options.
 # Add/remove metrics here without touching Python.
 
-Y_new:
-  title: "Aggregate Output Yₜ"
-  ylabel: "Y (output)"
-  log_y: true
+
 
 y_growth_pct:
   title: "Year-on-Year Growth Rate of Y"
@@ -43,8 +40,8 @@ triage_eff:
   ylabel: "Efficiency score"
   log_y: false
 
-congestion_idx:
-  title: "Congestion Index η·Ū₋ᵢ"
+congestion_idx_mean:         
+  title: "Congestion Index η·Ū̄ (scenario mean)"
   ylabel: "Congestion index"
   log_y: false
 
