@@ -103,12 +103,18 @@ def _add_effective_skills(df: pd.DataFrame) -> pd.DataFrame:
     effective_skills(t) = synergy(t) * logistic_factor(t)
     Falls back gracefully if the multiplier column is absent (legacy runs).
     """
+    if "synergy" not in df.columns:
+        # Phase B runs → leave column present but empty for now
+        df["effective_skills"] = np.nan
+        return df
+
     if "logistic_factor" in df.columns:
         df["effective_skills"] = (
             df["synergy"] * df["logistic_factor"]
         ).astype("float64")
-    else:                              # back-compat - keeps pipeline green
+    else:
         df["effective_skills"] = df["synergy"].astype("float64")
+
     return df
 
 def _add_queue_kpis(                            
