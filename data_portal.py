@@ -53,7 +53,8 @@ _SGA_SCHEMA = pa.DataFrameSchema(
     {
         "scenario_id": Column(str, nullable=False),
         "t":            Column(int, Check.ge(0), nullable=False),
-        "sga_pct":      Column(float, Check.ge(0), Check.le(1), nullable=False),
+        "sga_pct": Column(float, checks=[Check.ge(0), Check.le(1)], nullable=False),
+
     },
     strict=True,
     coerce=True,

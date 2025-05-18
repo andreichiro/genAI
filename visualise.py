@@ -62,7 +62,8 @@ def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
     wide = (df.assign(_col=col_name)
               .pivot_table(index="t", columns="_col", values=metric,
                            aggfunc="mean")     # duplicates averaged
-              .sort_index())
+              .sort_index()
+              .dropna(how="all", axis=1))    
     return wide
 
 def _load_specs() -> dict:
@@ -115,10 +116,11 @@ def _draw(metric: str, spec: dict, wide: pd.DataFrame,
     _plt.close(ax.figure)
 
     # -------- Plotly
-    fig = _px.line(wide, labels={"value": spec.get("ylabel", metric),
-                                 "t": "Year t"},
+    fig = _px.line(wide, x=wide.index, y=wide.columns,
+                   labels={"x": "Year t", "value": spec.get("ylabel", metric)},
                    title=spec.get("title", metric),
                    log_y=bool(spec.get("log_y", False)))
+
     fig.write_html(out_html, include_plotlyjs="cdn")
 
 def render_all() -> None:
@@ -139,20 +141,21 @@ def render_all() -> None:
 
     for metric, spec in tqdm(specs.items(), desc="plots"):
         # 1️⃣  availability check
+        
         if metric not in df.columns or df[metric].isna().all():
             _LOG.warning("Metric '%s' missing or all-NaN – skipped.", metric)
             continue
 
         # 2️⃣  reshape to wide format (handles firm-level vs scenario-level)
-        wide = _pivot(df, metric).dropna(how="all")
+        wide = _pivot(df, metric)
         if wide.empty:
             _LOG.warning("Metric '%s' has no finite data – skipped.", metric)
             continue
 
-        # 3️⃣  render static PNG + interactive HTML in one call
         _draw(metric, spec, wide,
               _DIR_PNG  / f"{metric}.png",
               _DIR_HTML / f"{metric}.html")
+
 
     _LOG.info("Phase D finished ✓")
 

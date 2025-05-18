@@ -103,16 +103,13 @@ def _add_queue_kpis(
         • triage_eff       – passthrough column
         • ROI_skill        – legacy placeholder (kept for back-compat)
     """
-    # make sure every column is present 
-    for col in ("mean_latency", "p95_latency",
-            "max_latency",  "std_latency",         
-            "creativity_loss", "triage_eff", "ROI_skill"):
-    
-        df[col] = df[f"{col}_new"].combine_first(df[col])
-        df.drop(columns=[f"{col}_new"], inplace=True)
-        
+    for col in (
+        "mean_latency", "p95_latency", "max_latency", "std_latency",
+        "creativity_loss", "triage_eff", "ROI_skill",
+    ):
         if col not in df.columns:
             df[col] = np.nan
+
 
     # nothing to merge – return early 
     if not idea_log_path.exists():
@@ -125,24 +122,33 @@ def _add_queue_kpis(
         log_df["lat"] = (log_df["t_eval"] - log_df["t_arrival"]).astype("float64")
 
         grp   = log_df.groupby(["scenario_id", "t_eval"])["lat"]
-        stats = grp.agg(
-            mean_latency = "mean",
-            p95_latency  = lambda s: np.percentile(s, 95),
-            max_latency  = "max",
-            std_latency  = "std",
+        stats = (
+            grp.agg(
+                mean_latency="mean",
+                p95_latency=lambda s: np.percentile(s, 95),
+                max_latency="max",
+                std_latency="std",
+            )
+            .reset_index()
+            .rename(columns={"t_eval": "t"})
+            # give right-hand columns a _new suffix so they are
+            #      guaranteed to survive the merge even if they don't clash
+            .rename(
+                columns={c: f"{c}_new" for c in (
+                    "mean_latency", "p95_latency", "max_latency", "std_latency"
+                )}
+            )
         )
 
 
+
         # Outer-merge and coalesce with any pre-existing values
-        df = df.merge(stats, how="left",
-                      on=["scenario_id", "t"],
-                      suffixes=("", "_new"))
-        for col in ("mean_latency", "p95_latency"):
+        df = df.merge(stats, how="left", on=["scenario_id", "t"])
+        for col in ("mean_latency", "p95_latency",  
+                    "max_latency", "std_latency"):            
             df[col] = df[f"{col}_new"].combine_first(df[col])
-            df.drop(columns=[f"{col}_new"], inplace=True)
-
+            df.drop(columns=[f"{col}_new"], inplace=True, errors="ignore")
     return df
-
 
 def _add_market_and_decay(df: pd.DataFrame) -> pd.DataFrame:
     """
