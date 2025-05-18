@@ -108,8 +108,9 @@ def _add_queue_kpis(
         "mean_latency", "p95_latency", "max_latency", "std_latency",
         "creativity_loss", "triage_eff", "ROI_skill",
     ):
-        if col not in df.columns:
-            df[col] = np.nan
+            df[col] = df[f"{col}_new"].combine_first(df[col])
+            df.drop(columns=f"{col}_new", inplace=True)
+
 
 
     # nothing to merge – return early 
