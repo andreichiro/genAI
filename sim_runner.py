@@ -4,59 +4,26 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
 
-from joblib import Parallel, delayed
 try:
     from tqdm import tqdm  
 except ImportError: 
     def tqdm(it, **kwargs):  # type: ignore
         return it
 
-from scenarios import load_scenarios, ScenarioCfg
-from genAI import compute_y_romer, GrowthExplosionError  
 import curation                                
 
+import pandas as pd
+from scenarios import load_scenarios_ecb, ScenarioECB
+from multifirm_runner import run_ecb 
+
 # helpers                                                                     #
-
-def _run_single(cfg: ScenarioCfg) -> pd.DataFrame:
-    """Run one scenario and return a tidy DataFrame of step logs."""
-    try:
-        res: Dict[str, Any] = compute_y_romer(
-            num_periods=cfg.num_periods,
-            alpha=cfg.alpha,
-            labor_func=cfg.labor_func,
-            capital_func=cfg.capital_func,
-            synergy_func=cfg.synergy_func,
-            intangible_func=cfg.intangible_func,
-            x_values_updater=cfg.x_values_updater,
-            total_labor_func=cfg.total_labor_func,
-            share_for_rd_func=cfg.share_for_rd_func,
-            dt_integration=cfg.dt_integration,
-            growth_explosion_threshold=cfg.growth_explosion_threshold,
-            intangible_kappa=cfg.intangible_kappa,
-            intangible_Ubar=cfg.intangible_Ubar,
-            intangible_epsilon=cfg.intangible_epsilon,
-            store_results=True,
-        )
-    except GrowthExplosionError as exc:            # +++ NEW +++
-        raise RuntimeError(f"[sim_runner] {exc}") from exc
-
-    if res["growth_explosion"]:
-        raise RuntimeError(f"[sim_runner] Growth explosion in scenario '{cfg.id}'")
-
-    df = pd.DataFrame(res["outputs"])
-    df["scenario_id"] = cfg.id
-    return df
-
-
-def _collect(dfs: List[pd.DataFrame]) -> pd.DataFrame:
-    """Concatenate & lightly coerce via Phase-B curation stub."""
-    long = pd.concat(dfs, ignore_index=True)
-    return curation.tidy_dataframe(long)
+def _collect(df: pd.DataFrame) -> pd.DataFrame:
+    """Pass the raw output through Phase-E lightweight tidier."""
+    return curation.tidy_dataframe(df)
 
 # CLI                                                                         #
-
 def main(argv: List[str] | None = None) -> None:
     p = argparse.ArgumentParser(description="Run all scenario simulations.")
     p.add_argument("--config", default="scenarios.yaml",
@@ -68,25 +35,19 @@ def main(argv: List[str] | None = None) -> None:
 
     args = p.parse_args(argv)
 
-    scenarios = load_scenarios(args.config)
+    scenarios: List[ScenarioECB] = load_scenarios_ecb(args.config)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    final_df = run_ecb(scenarios, jobs=args.jobs)
+    final_df = _collect(final_df)
 
-    if args.jobs == 1:
-        dfs = [_run_single(cfg) for cfg in tqdm(scenarios, desc="Simulations")]
-    else:                                 # parallel branch
-        dfs = Parallel(n_jobs=args.jobs, backend="loky")(
-            delayed(_run_single)(cfg) for cfg in tqdm(scenarios, desc="Simulations")
-        )
-
-    final_df = _collect(dfs)
     final_df.to_parquet(args.out, index=False)
 
     # write a small head-preview for quick git-diffs
     preview = Path(args.out).with_suffix(".preview.csv")
-    final_df.head(10).to_csv(preview, index=False)
+    final_df.to_csv(preview, index=False)
 
     print(f"[sim_runner] ✅ wrote {len(final_df):,} rows -> {args.out}")
-    print(f"[sim_runner] 📄 preview (10 rows) -> {preview}")
+    print(f"[sim_runner] 📄 preview  -> {preview}")
 
 
 if __name__ == "__main__":                # entry-point
@@ -127,7 +88,7 @@ The per-scenario DataFrames are concatenated, then run through curation.tidy_dat
 
 The full long-format dataset becomes outputs/simulations.parquet.
 
-A tiny 10-row preview CSV lands next to it (same basename, .preview.csv extension) so pull requests show a human-readable diff instead of a binary blob.
+A CSV lands next to it (same basename, .preview.csv extension) so pull requests show a human-readable diff instead of a binary blob.
 
 7. Exit codes and messages
 A friendly ✓ summary prints on success. On any fatal error (e.g., growth explosion) the script writes the message to stderr and exits with non-zero status so CI will fail.

@@ -3,10 +3,20 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Any
+from typing import Callable, Dict, List, Any, Final      
 
 import numpy as np
 import yaml
+
+from utils.ecb_params    import ECBParams
+from utils.triage_params import TriageParams         
+
+ARCHETYPES: Final = {
+    "top",
+    "intermediate",
+    "bottom",
+   "latency_decay",          #opportunity-cost latency scenarios
+}
 
 # data-class consumed by compute_y_romer & sim_runner
 @dataclass(frozen=True, slots=True)
@@ -35,6 +45,19 @@ class ScenarioCfg:
     intangible_epsilon: float
     skill_interaction_func: Callable[[int, float, float], float]
     skill_interaction_on:    bool
+    ecb_params:    ECBParams
+    triage_params: TriageParams
+
+@dataclass(slots=True, frozen=True)
+class ScenarioECB:
+    """
+    Minimal configuration object consumed by `multifirm_runner.run_ecb`.
+    """
+    id:            str
+    num_periods:   int
+    firms_init:    List[Dict[str, Any]]        # per-firm starting stocks
+    ecb_params:    ECBParams
+    triage_params: TriageParams
 
 # public API 
 def load_scenarios(yaml_path: str | Path = "scenarios.yaml") -> List[ScenarioCfg]:
@@ -46,6 +69,39 @@ def load_scenarios(yaml_path: str | Path = "scenarios.yaml") -> List[ScenarioCfg
     data: Dict[str, Any] = yaml.safe_load(Path(yaml_path).read_text())
     defaults = data["defaults"]
     return [_build_scenario(row, defaults) for row in data["scenarios"]]
+
+def load_scenarios_ecb(yaml_path: str | Path = "scenarios.yaml") -> List[ScenarioECB]:
+    """
+    Parse the ECB-style section of `scenarios.yaml` and return a list of
+    ScenarioECB objects. Only scenarios marked with engine: ecb are processed.
+    """
+    raw = yaml.safe_load(Path(yaml_path).read_text())
+
+    defaults = raw.get("defaults", {})
+    ecb_defaults = defaults.get("ecb_params", {})
+    triage_defaults = defaults.get("triage_params", {})
+
+    out: List[ScenarioECB] = []
+    for row in raw["scenarios"]:
+        # Only process scenarios explicitly marked as ECB
+        if row.get("engine") == "ecb":
+            # ECB scenarios must have firms_init
+            if "firms_init" not in row:
+                raise ValueError(f"ECB scenario '{row['id']}' is missing required 'firms_init' configuration")
+
+            ecb_cfg = {**ecb_defaults, **row.get("ecb", {})}
+            tri_cfg = {**triage_defaults, **row.get("triage", {})}
+
+            scenario = ScenarioECB(
+                id=row["id"],
+                num_periods=row.get("num_periods", defaults["num_periods"]),
+                firms_init=row["firms_init"],
+                ecb_params=ECBParams(**ecb_cfg),
+                triage_params=TriageParams(**tri_cfg),
+            )
+            out.append(scenario)
+
+    return out
 
 # ── internal helpers (thresholds, capital paths, labour splits, …) ────
 def _zero(_: int) -> float:                     # reusable λ 0
@@ -117,10 +173,23 @@ _X_UPDATERS = {
     "frozen": _x_frozen,
 }
 
+def _subset_kwargs(cls, cfg_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the sub-mapping whose keys match dataclass *cls* fields."""
+    allowed = set(cls.__dataclass_fields__)           # type: ignore[attr-defined]
+    return {k: v for k, v in cfg_dict.items() if k in allowed}
+
 # ── main builder ───────────────────────────────────────────────────────
 def _build_scenario(row: Dict[str, Any], defaults: Dict[str, Any]) -> ScenarioCfg:
     # merge parameter dicts 
     p = {**defaults, **row.get("params", {})}
+
+    ecb_cfg_src     = {**defaults.get("ecb_params", {}), **row.get("ecb", {})}
+    triage_cfg_src  = {**defaults.get("triage_params", {}), **row.get("triage", {})}
+
+    ecb_params_obj    = ECBParams(**_subset_kwargs(ECBParams,    ecb_cfg_src))
+    triage_params_obj = TriageParams(**_subset_kwargs(TriageParams, triage_cfg_src))
+
+
     # threshold-driven synergy & intangible 
     th = p["threshold"]
     if row["threshold"] == "smooth":
@@ -202,6 +271,8 @@ def _build_scenario(row: Dict[str, Any], defaults: Dict[str, Any]) -> ScenarioCf
         intangible_epsilon=p.get("intangible_epsilon", 0.5),
         skill_interaction_func=_skill_interaction,
         skill_interaction_on=skill_interaction_on,
+        ecb_params=ecb_params_obj,
+        triage_params=triage_params_obj,
     )
 
 """

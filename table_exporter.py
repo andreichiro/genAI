@@ -14,7 +14,16 @@ _TDIR  = _CUR / "tables"
 _TCSV  = _TDIR / "summary_metrics.csv"
 _TTEX  = _TDIR / "summary_metrics.tex"
 
-_METRICS = ["Y_new", "y_growth_pct", "capital_intensity", "rd_share"]
+_METRICS = [
+    "Y_new",
+    "y_growth_pct",
+    "capital_intensity",
+    "rd_share",
+    "Creativity_loss",   
+    "Triage_eff",       
+    "market_share",
+    "Y_lost_decay",
+]
 
 def _build_summary(df: pd.DataFrame) -> pd.DataFrame:
     """Scenario-level mean of the key Phase-C derived metrics."""

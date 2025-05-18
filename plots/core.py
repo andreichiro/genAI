@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
 
+import numpy as np
+from utils.screening_shared import congestion_tail, psi_peak_series
+
 # Config
 _PNG_DPI = 300
 _DEFAULT_PALETTE = "Set2"        # colour-blind safe
@@ -77,6 +80,94 @@ def interactive_lineplot(
     outfile.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(outfile, include_plotlyjs="cdn")
     _LOG.info("HTML written → %s", outfile.as_posix())
+
+def tail_cdf_plot(U_bar_series, *, ax=None,
+                  title="Congestion tail Φ(u)"):
+    """
+    Plot the empirical survival CDF Φ(u) for the mean-field series Ū(t).
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    phi = congestion_tail(U_bar_series)
+    ax.plot(phi.index, phi.values, linewidth=2)
+    ax.set_xlabel("u  (mean evaluation capital)")
+    ax.set_ylabel("Φ(u) = P[Ū ≥ u]")
+    ax.set_ylim(0, 1)
+    ax.set_title(title)
+    return ax
+
+
+def psi_peak_plot(df_firms, *, kpi_col="psi_eff",
+                  ax=None, title="ψ_eff peak diagnostic"):
+    """
+    For every period t, plot the maximum ψ_eff across firms.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    peak = psi_peak_series(df_firms, kpi_col=kpi_col)
+    ax.plot(peak.index, peak.values, linewidth=2)
+    ax.set_xlabel("t")
+    ax.set_ylabel("max ψ_eff(t)")
+    ax.set_title(title)
+    return ax
+
+
+def histplot(df: pd.DataFrame,
+             metric: str,
+             spec: dict,
+             outfile: Path) -> None:
+    """
+    Static histogram (Matplotlib) for a scalar metric – used for
+    σ̂² distribution, Creativity_loss, Triage_eff, etc.
+    """
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.hist(df[metric].dropna(), bins=spec.get("bins", 40))
+    ax.set_xlabel(spec["ylabel"])
+    ax.set_ylabel("Count")
+    ax.set_title(spec["title"])
+    fig.tight_layout()
+
+    outfile.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outfile, dpi=_PNG_DPI)
+    plt.close(fig)
+    _LOG.info("Histogram written → %s", outfile.as_posix())
+
+def barplot(df: pd.DataFrame,
+            metric: str,
+            spec: dict,
+            outfile: Path) -> None:
+    """
+    Scenario-level bar chart – complements histograms for metrics where
+    cross-scenario comparison is more useful than a distribution view.
+    Intended for KPI means such as ROI_skill (Phase G tables & plots).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Curated dataset.
+    metric : str
+        Column name to aggregate (mean) then plot.
+    spec : dict
+        Plot spec from YAML (keys: title, ylabel, optionally rotate_xticks).
+    outfile : Path
+        Where the PNG should be written.
+    """
+    means = (df.groupby("scenario_id")[metric]
+               .mean()
+               .sort_values(ascending=False))
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(means.index, means.values)
+    ax.set_ylabel(spec["ylabel"])
+    ax.set_title(spec["title"])
+    if spec.get("rotate_xticks", True):
+        ax.set_xticklabels(means.index, rotation=45, ha="right")
+    fig.tight_layout()
+
+    outfile.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outfile, dpi=_PNG_DPI)
+    plt.close(fig)
+    _LOG.info("Bar chart written → %s", outfile.as_posix())
 
 
 """

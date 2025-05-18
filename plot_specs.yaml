@@ -22,3 +22,34 @@ rd_share:
   title: "R&D Share of Labour"
   ylabel: "Lᴿᴰ / (Lᴿᴰ + Lᴾ)"
   log_y: false
+
+mean_latency:
+  title: "Mean Queue Latency"
+  ylabel: "Mean latency (periods)"
+  log_y: false
+
+p95_latency:
+  title: "95ᵗʰ-Percentile Queue Latency"
+  ylabel: "p95 latency (periods)"
+  log_y: false
+
+creativity_loss:
+  title: "Creativity Loss (%)"
+  ylabel: "Lost creative value"
+  log_y: false
+
+triage_eff:
+  title: "Triage Efficiency"
+  ylabel: "Efficiency score"
+  log_y: false
+
+congestion_idx:
+  title: "Congestion Index η·Ū₋ᵢ"
+  ylabel: "Congestion index"
+  log_y: false
+
+market_share:
+  title: "Firm Market Share"
+  ylabel: "Share of total Y"
+  log_y: false
+  

@@ -10,22 +10,25 @@ import pandas as pd
 import numpy as np
 import validator  
 from pathlib import Path
+from collections import OrderedDict          # add to imports
 
 _EXPECTED_ORDER: Final = [
-    "scenario_id", "t", "Y_new", "capital_current",
-    "LY", "LA", "synergy", "intangible", 
-    "intangible_stock", "logistic_factor",
-    "knowledge_after"
-    ]
-
-_DERIVED_COLS: Final = [
-    "x_sum", "x_varieties",           # flattened from x_values
-    "y_growth_pct",
-    "capital_intensity",
-    "rd_share",
-    "effective_skills"
+    "scenario_id", "t", "firm_id",
+    "Y_new",       # output
+    "psi_eff", "theta", "queue_len",
 ]
 
+_DERIVED_COLS: Final = [
+    "y_growth_pct",
+    "mean_latency",
+    "p95_latency",
+    "creativity_loss",
+    "triage_eff",
+    "ROI_skill",
+    "congestion_idx",
+    "market_share",
+    "Y_lost_decay",
+]
 
 def tidy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -43,14 +46,6 @@ def tidy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         df["x_values"] = df["x_values"].apply(lambda x: np.asarray(x, dtype=float))
     return df
 
-def _flatten_x(df: pd.DataFrame) -> pd.DataFrame:
-    """Replace the vector column `x_values` by its sum and count."""
-    arrays = df.pop("x_values")                         # remove original col
-    df["x_sum"] = arrays.apply(np.sum).astype("float64")
-    df["x_varieties"] = arrays.apply(len).astype("int64")
-    return df
-
-
 def _add_growth(df: pd.DataFrame) -> pd.DataFrame:
     """Add %-growth of Y_new within each scenario (first period = 0)."""
     df = df.sort_values(["scenario_id", "t"])
@@ -61,7 +56,6 @@ def _add_growth(df: pd.DataFrame) -> pd.DataFrame:
           .astype("float64")
     )
     return df
-
 
 def _add_intensity(df: pd.DataFrame) -> pd.DataFrame:
     """Capital intensity and R&D share metrics."""
@@ -87,6 +81,79 @@ def _add_effective_skills(df: pd.DataFrame) -> pd.DataFrame:
         df["effective_skills"] = df["synergy"].astype("float64")
     return df
 
+def _add_queue_kpis(                             # ← REPLACE ENTIRE FUNCTION
+    df: pd.DataFrame,
+    idea_log_path: Path = Path("outputs/idea_log.parquet"),
+) -> pd.DataFrame:
+    """
+    Merge queue-level diagnostics computed by `queue_dynamics.parquet_writer`.
+
+    Always guarantees that the four Phase-E KPIs exist in *df* even when the
+    parquet is missing or incomplete, so downstream schema validation is safe.
+
+        • mean_latency     – mean wait time, per period
+        • p95_latency      – 95-th percentile wait time
+        • creativity_loss  – passthrough column (if already produced upstream)
+        • triage_eff       – passthrough column
+        • ROI_skill        – legacy placeholder (kept for back-compat)
+    """
+    # make sure every column is present 
+    for col in ("mean_latency", "p95_latency",
+                "creativity_loss", "triage_eff", "ROI_skill"):
+        if col not in df.columns:
+            df[col] = np.nan
+
+    # nothing to merge – return early 
+    if not idea_log_path.exists():
+        return df
+
+    log_df = pd.read_parquet(idea_log_path)
+
+    # compute latency statistics 
+    if {"t_eval", "t_arrival"}.issubset(log_df.columns):
+        log_df["lat"] = (log_df["t_eval"] - log_df["t_arrival"]).astype("float64")
+
+        grp   = log_df.groupby(["scenario_id", "t_eval"])["lat"]
+        stats = grp.agg(
+            mean_latency="mean",
+            p95_latency=lambda s: np.percentile(s, 95),
+        ).reset_index().rename(columns={"t_eval": "t"})
+
+        # Outer-merge and coalesce with any pre-existing values
+        df = df.merge(stats, how="left",
+                      on=["scenario_id", "t"],
+                      suffixes=("", "_new"))
+        for col in ("mean_latency", "p95_latency"):
+            df[col] = df[f"{col}_new"].combine_first(df[col])
+            df.drop(columns=[f"{col}_new"], inplace=True)
+
+    return df
+
+
+def _add_market_and_decay(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    • market_share   = firm output / total output each period
+    • Y_lost_decay   = nominal output minus decay-adjusted output
+
+    Works even if legacy runs lack Y_new_nominal (falls back to zero loss).
+    """
+    # Market share 
+    df["market_share"] = (
+        df.groupby("t")["Y_new"]
+          .transform(lambda col: col / col.sum() if col.sum() > 0 else np.nan)
+          .astype("float64")
+    )
+
+    # Latency-decay loss 
+    if "Y_new_nominal" not in df.columns:
+        df["Y_new_nominal"] = df["Y_new"]          # legacy back-compat
+    df["Y_lost_decay"] = (
+        (df["Y_new_nominal"] - df["Y_new"])
+        .clip(lower=0)
+        .astype("float64")
+    )
+    return df
+
 def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     """
     Read the raw Phase-B parquet, validate, enrich, and write the curated file.
@@ -99,15 +166,16 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
 
     # 2) Transform pipeline
     df = (
-        raw.pipe(_flatten_x)
-           .pipe(_add_growth)
-           .pipe(_add_intensity)
-           .pipe(_add_effective_skills)
+        raw
+            .pipe(_add_growth)
+            .pipe(_add_queue_kpis) 
+            .pipe(_add_market_and_decay)  
     )
 
     # 3) Re-order columns → core · derived · any extras
     base_cols = [c for c in raw.columns if c != "x_values"]
-    df = df[base_cols + _DERIVED_COLS]
+    ordered_unique_cols = list(OrderedDict.fromkeys(base_cols + _DERIVED_COLS))
+    df = df[ordered_unique_cols]
 
     # 4) Persist artefacts
     out_path = Path("outputs/simulations_curated.parquet")
@@ -115,7 +183,7 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     df.to_parquet(out_path, index=False)
-    df.head(10).to_csv(preview_path, index=False)
+    df.to_csv(preview_path, index=False)
 
     print(f"[curation] ✅ wrote {len(df):,} rows  →  {out_path}")
     print(f"[curation] 📄 preview (10 rows)      →  {preview_path}")

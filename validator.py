@@ -4,22 +4,29 @@ import pandera as pa
 from pandera import Column, Check
 
 # DataFrameSchema 
+
 SCHEMA = pa.DataFrameSchema(
     {
-        "scenario_id":      Column(str,   nullable=False),
-        "t":                Column(int,   Check.ge(0)),
-        "LY":               Column(float, Check.ge(0)),
-        "LA":               Column(float, Check.ge(0)),
-        "capital_current":  Column(float, Check.ge(0)),
-        "synergy":          Column(float, Check.ge(0)),
-        "intangible":       Column(float, Check.ge(0)),
-        "knowledge_after":  Column(float, Check.ge(0)),
-        "Y_new":            Column(float, Check.ge(0)),
-        "x_values":         Column(object, nullable=False),
+        # ── core identifiers ──────────────────────────────────────────────
+        "scenario_id": Column(str, nullable=False),
+        "firm_id":     Column(int, Check.ge(0)),
+        "t":           Column(int, Check.ge(0)),
+
+        # ── ECB micro KPIs ────────────────────────────────────────────────
+        "Y_new":       Column(float, Check.ge(0)),
+        "psi_eff":     Column(float, Check.ge(0)),
+        "theta":       Column(float, Check.ge(0)),
+        "congestion_idx":   Column(float, Check.ge(0), nullable=True),
+        "queue_len":   Column(int,   Check.ge(0)),
+
+        # ── optional / derived ────────────────────────────────────────────
+        "mean_latency": Column(float, Check.ge(0), nullable=True),
+        "p95_latency":  Column(float, Check.ge(0), nullable=True),
+        "market_share": Column(float, Check.in_range(0, 1), nullable=True),
     },
-    coerce=True,     # auto-cast dtypes
-    strict=False,    # allow extra cols (knowledge_before, etc.)
-    index=pa.Index(int, name="row_id"),
+    coerce=True,
+    strict=False,              # allow future experimental columns
+    index=pa.Index(int),       # generic RangeIndex; no name constraint
 )
 
 """

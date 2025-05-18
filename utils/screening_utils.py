@@ -1,0 +1,228 @@
+# utils/screening_utils.py
+
+import logging
+import numpy as np                    
+from numpy.random import Generator
+from typing import Final
+from typing import Tuple, Sequence
+from utils.ecb_params import ECBParams      
+
+def gen_ideas(
+    kai: float,
+    params: ECBParams,
+    rng: Generator
+) -> int:
+    """
+    Draws the number of new candidate ideas in the current period.
+
+    N ~ Poisson(λ · K_AI)
+
+    Parameters
+    ----------
+    kai : float
+        The firm’s AI-generation capital \(K_{AI,t}\) (≥ 0).
+    params : ECBParams
+        Container of model scalars; must provide `lambda_poisson`.
+    rng : numpy.random.Generator
+        A NumPy RNG passed down to keep simulation reproducible
+        under joblib / multiprocessing.
+
+    Returns
+    -------
+    int
+        Realisation of the Poisson random variable. Guaranteed ≥ 0.
+    """
+    if kai < 0:
+        raise ValueError(f"K_AI must be ≥ 0, got {kai}")
+    lam: Final = params.lambda_poisson * kai
+    if lam < 0:
+        # should never happen, but we guard anyway
+        raise ValueError(f"Poisson λ became negative ({lam})")
+    return int(rng.poisson(lam=lam))
+
+
+def theta_total(
+    uf: float,
+    unf: float,
+    h_nf: float,
+    params: ECBParams,
+    accuracy_t: float = 1.0,
+) -> float:
+    """
+    Total screening accuracy θ_t ∈ [0,1].
+
+        U_tot  = Uf + ξ₁ · Unf · H_nf^ζ
+        θ_cap  = 1 – exp(–ξ_success · U_tot)
+        θ_skill= 1 – exp(–χ_skill  · H_nf)
+        θ_tot  = θ_cap · θ_skill · accuracy_t   (clamped to 1)
+
+    Parameters
+    ----------
+    uf, unf : float
+        Fungible / non-fungible evaluation capital stocks (≥ 0).
+    h_nf : float
+        Human evaluator skill stock (≥ 0).
+    params : ECBParams
+        Model parameters (ξ₁, ζ_skill_exp, ξ_success, χ_skill).
+    accuracy_t : float, optional
+        Period-specific residual accuracy multiplier (defaults 1).
+
+    Returns
+    -------
+    float
+        θ_tot clamped to ≤ 1.
+    """
+    if min(uf, unf, h_nf) < 0:
+        raise ValueError("Capital and skill inputs must be ≥ 0")
+
+    u_tot = uf + params.xi1 * unf * (h_nf ** params.zeta_skill_exp)
+
+    theta_cap   = 1.0 - np.exp(-params.xi_success * u_tot)
+    theta_skill = 1.0 - np.exp(-params.chi_skill  * h_nf)
+    theta       = theta_cap * theta_skill * accuracy_t
+
+    if theta > 1.0 + 1e-12:          # numeric margin
+        logging.debug("θ_total %.4f > 1 — clamped to 1", theta)
+    return min(theta, 1.0)
+
+def _psi_inv_u(u_tot: float, p: ECBParams) -> float:
+    """
+    Inverted-U evaluation-capacity curve (over-evaluation drag).
+
+        Ψ_raw = ψ0 + (ψ_max–ψ0) · ( (u_tot / U⋆) · exp(1 − u_tot/U⋆) )
+
+    • Peaks at U_tot = U⋆, then falls → captures bureaucratic bloat.
+    • Returns ψ0 when U_tot → 0, guaranteeing continuity.
+    """
+    mid   = max(p.U_star, 1e-9)                     # avoid divide-by-zero
+    width = p.psi_max - p.psi0
+    return p.psi0 + width * ((u_tot / mid) * np.exp(1.0 - u_tot / mid))
+
+def screening_capacity(
+    uf: float,
+    unf: float,
+    h_nf: float,
+    params: ECBParams,
+    u_bar_mean: float,
+) -> float:
+    """
+    Effective evaluation throughput Ψ_eff given capital, skill and congestion.
+
+        U_tot = Uf + ξ₁·Unf·H_nf^ζ
+        Ψ_raw = ψ0 + (ψ_max – ψ0) / (1 + exp(–κ·(U_tot – U_star)))
+        Ψ_eff = Ψ_raw / (1 + η · Ū_{-i})
+
+    Parameters
+    ----------
+    uf, unf, h_nf : float
+        Capital & skill stocks (≥ 0).
+    params : ECBParams
+        Must include ψ0, ψ_max, kappa, U_star, eta_congestion.
+    u_bar_mean : float
+        Congestion term: mean evaluation capital of rival firms.
+
+    Returns
+    -------
+    float
+        Throughput rate Ψ_eff ≥ 0.
+    """
+    if min(uf, unf, h_nf, u_bar_mean) < 0:
+        raise ValueError("Inputs must be ≥ 0")
+
+    u_tot = uf + params.xi1 * unf * (h_nf ** params.zeta_skill_exp)
+
+    if params.psi_shape == "inv_u":
+        psi_raw = _psi_inv_u(u_tot, params)
+    else:  # default “logistic”
+         z = -params.kappa * (u_tot - params.U_star)
+         z_clipped = np.clip(z, -700.0, 700.0)     # exp() safe range
+         denom = 1.0 + np.exp(z_clipped)
+         psi_raw = params.psi0 + (params.psi_max - params.psi0) / denom
+
+    return psi_raw / (1.0 + params.eta_congestion * u_bar_mean)
+
+# ‣ REQ-TICK posterior update formula (μ̂, σ̂²) derived from N-N model
+def bayes_update(
+    signal: float,
+    mu_prior: float,
+    tau_prior: float,
+    sigma_signal: float,
+) -> Tuple[float, float]:
+    """
+    Computes the posterior mean *and* variance of idea quality given
+    a noisy signal under a Normal-Normal conjugate pair.
+
+        μ̂  = (τ² / (τ²+σ²)) · s  +  (σ² / (τ²+σ²)) · μ₀
+        σ̂² = (τ² · σ²) / (τ² + σ²)
+
+    Parameters
+    ----------
+    signal : float
+        Observed noisy signal *s*.
+    mu_prior : float
+        Prior mean μ₀.
+    tau_prior : float
+        Prior std-dev τ ( >0 ).
+    sigma_signal : float
+        Signal noise std-dev σ ( >0 ).
+
+    Returns
+    -------
+    (mu_post, var_post) : tuple[float,float]
+        Posterior expectation and variance.  `var_post ≥ 0`.
+    """
+    if tau_prior <= 0 or sigma_signal <= 0:
+        raise ValueError("tau_prior and sigma_signal must be > 0")
+
+    tau2, sigma2 = tau_prior ** 2, sigma_signal ** 2
+    weight = tau2 / (tau2 + sigma2)           # τ² / (τ²+σ²)
+    mu_post = weight * signal + (1.0 - weight) * mu_prior
+    var_post = (tau2 * sigma2) / (tau2 + sigma2)
+    return mu_post, var_post
+
+
+# ‣ REQ-TICK triage score with λ-explore · σ̂²
+def triage_score(
+    mu_post: float,
+    var_post: float,
+    lambda_explore: float,
+) -> float:
+    """
+    Creativity-weighted triage score:
+
+        T = μ̂  +  λ · σ̂²
+
+    λ > 0 favours variance (exploration); λ < 0 = conservative.
+    """
+    if var_post < 0:
+        raise ValueError("Posterior variance must be non-negative")
+    return mu_post + lambda_explore * var_post
+
+
+# ‣ REQ-TICK adaptive threshold helper (percentile or absolute)
+def compute_threshold(
+    scores: Sequence[float],
+    rule: str = "percentile",
+    value: float = 0.0,
+) -> float:
+    """
+    Returns the triage cut-off *T̄* according to the chosen rule.
+
+    • rule="percentile": `value` interpreted as a 0-100 percentile.
+    • rule="absolute"  : `value` used verbatim.
+    """
+    if not scores:
+        return float("inf")          # empty batch → nothing selected
+
+    if rule == "percentile":
+        if not (0.0 <= value <= 100.0):
+            raise ValueError("percentile must be in [0,100]")
+        return float(np.percentile(scores, value))
+    elif rule == "absolute":
+        return float(value)
+    else:
+        raise ValueError(f"Unknown threshold rule '{rule}'")
+
+psi_efficiency = screening_capacity     # alias for clarity
+theta_accuracy = theta_total           # alias for clarity
+__all__ = ["psi_efficiency", "theta_accuracy"]  # keep linters happy

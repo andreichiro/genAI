@@ -16,6 +16,28 @@ defaults:
   # set >0 to enable the skill-interaction channel
   skill_interaction_strength: 0.0
 
+
+  ecb_params:                
+    psi0:               0.0
+    psi_max:            10.0
+    U_star:             5.0
+    kappa:              1.0
+    psi_shape:          logistic
+    eta_congestion:     0.05
+    lambda_poisson:     0.10
+    eta_clip:           1.0
+    eta_decay:          0.0
+    v0_mu:              1.0
+    v0_sigma:           0.20
+    mobility_elasticity: 0.0
+    shared_pool:        false
+  triage_params:               
+    sigma_signal:    1.0
+    tau_prior:       1.0
+    lambda_explore:  0.0
+    threshold_rule:  percentile
+    threshold_value: 50.0
+
 scenarios:
   # exemplar quartet 
   - id: top-smooth-boom-prod-early      # ← scenario ID (free text)
@@ -68,6 +90,80 @@ scenarios:
       threshold: {t_star: 18, height: 0.4}
       boom_bust: {amplitude: 0.05, bust_after: 8}
       labor:     {rd_share_high: 0.05, rd_share_low: 0.02}
+
+  - id: idea-latency-high-decay
+    archetype: latency_decay          # new archetype handled in parser
+    engine: ecb  
+    threshold: smooth                 # reuse existing qualitative axes
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: knowledge_scaled
+    firms_init: 
+      - {id: "idea-latency-high-decay", K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+    params:
+      steady:        {invest_rate: 0.06}
+      labor:         {rd_share_high: 0.15, rd_share_low: 0.05}
+      # Phase I-2 specific parameters
+      eta_decay:     0.15
+      v0_mu:         1.0
+      v0_sigma:      0.20
+
+  - id: ecb-moat-duopoly                     # strategic moat
+    archetype: top                           # reuse existing plotting group
+    engine:    ecb
+    threshold: smooth
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: knowledge_scaled
+    firms_init:               # two symmetric firms
+      - {id: A, K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+      - {id: B, K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+    ecb:                      # ECB overrides go here
+      mobility_elasticity: 0.40
+      shared_pool:        false
+
+    params:
+      steady:            {invest_rate: 0.08}
+      labor:             {rd_share_high: 0.15, rd_share_low: 0.05}
+
+  - id: shared-pool-industry                # common-pool ψ congestion
+    archetype: intermediate
+    engine:    ecb
+    threshold: smooth
+    investment_path: steady
+    labor_split: rd_heavy
+    shock_timing: none
+    x_updater: symmetric
+    firms_init:
+      - {id: Alpha,  K_AI:  8.0, U_f: 0.8, U_nf: 0.4, H_nf: 0.2}
+      - {id: Beta,   K_AI:  8.0, U_f: 0.8, U_nf: 0.4, H_nf: 0.2}
+      - {id: Gamma,  K_AI:  8.0, U_f: 0.8, U_nf: 0.4, H_nf: 0.2}
+    ecb:
+      shared_pool:        true
+      mobility_elasticity: 0.0
+    params:
+      steady:            {invest_rate: 0.06}
+      labor:             {rd_share_high: 0.30, rd_share_low: 0.10}
+
+  - id: education-pipeline-demo             # education lag
+    archetype: bottom
+    threshold: cliff
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: frozen
+    params:
+      threshold:         {t_star: 18, height: 0.4}
+      steady:            {invest_rate: 0.05}
+      labor:             {rd_share_high: 0.05, rd_share_low: 0.02}
+      education_lag:     4
+      enroll_rate:       0.10
+      enroll_const:      5.0          # ← non-zero seed flow
+      retire_rate:       0.02
+      initial_trainees:  50.0         # ← initial pool size
+
 # Add more scenarios by appending to the list above – no Python changes
 
 #How the file is organised
