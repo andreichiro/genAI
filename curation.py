@@ -255,6 +255,9 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
             .pipe(_add_tot_output)        # always defined by the try/except
     )
 
+    for col in ("x_sum", "x_varieties"):                                  
+        if col not in df.columns:                                         
+            df[col] = np.nan                                               
 
     # 3) Re-order columns → core · derived · any extras
     base_cols = [c for c in df.columns if c != "x_values"]  # use post-pipeline cols
