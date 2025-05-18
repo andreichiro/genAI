@@ -78,13 +78,24 @@ def _add_growth(df: pd.DataFrame) -> pd.DataFrame:
 
 def _add_intensity(df: pd.DataFrame) -> pd.DataFrame:
     """Capital intensity and R&D share metrics."""
-    # Avoid /0 → NaN, then keep float64 dtype
-    df["capital_intensity"] = (
-        df["capital_current"] / df["LY"].replace(0, np.nan)
-    ).astype("float64")
-    df["rd_share"] = (
-        df["LA"] / (df["LA"] + df["LY"]).replace(0, np.nan)
-    ).astype("float64")
+    cap_col = "capital_current" if "capital_current" in df.columns else "K_AI"
+    ly_col  = "LY"               if "LY"               in df.columns else "psi_eff"
+    la_col  = "LA"               if "LA"               in df.columns else None
+
+    if {cap_col, ly_col}.issubset(df.columns):
+        df["capital_intensity"] = (
+            df[cap_col] / df[ly_col].replace(0, np.nan)
+        ).astype("float64")
+    else:
+        df["capital_intensity"] = np.nan
+
+    if la_col and {la_col, ly_col}.issubset(df.columns):
+        df["rd_share"] = (
+            df[la_col] / (df[la_col] + df[ly_col]).replace(0, np.nan)
+        ).astype("float64")
+    else:
+        df["rd_share"] = np.nan
+
     return df
 
 def _add_effective_skills(df: pd.DataFrame) -> pd.DataFrame:
