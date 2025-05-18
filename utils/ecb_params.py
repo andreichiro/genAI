@@ -36,7 +36,6 @@ class ECBParams:
     sigma_noise:      float = 1.0     # Signal noise std-dev σ                  ◄ NEW
 
     shared_pool:        bool  = False     
-    mobility_elasticity:float = 0.0       
 
     # Clip factor in production 
     eta_clip:         float = 1.0     # scaling in min(x, η·Ψ_eff)

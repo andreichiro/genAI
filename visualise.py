@@ -26,10 +26,26 @@ _LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 _ROOT = Path(__file__).resolve().parent
-_DATA = _ROOT / "outputs" / "simulations_curated.parquet"
-_PLOT_SPECS = _ROOT / "plot_specs.yaml"
-_DIR_PNG = _ROOT / "figures"
-_DIR_HTML = _ROOT / "figures_html"
+_CFG_YAML = _ROOT / "scenarios.yaml"                              # ← [NEW]
+
+# sensible fall-backs (project-relative defaults)
+_DEFAULTS = {
+    "out_cur":  _ROOT / "outputs" / "simulations_curated.parquet",
+    "fig_png":  _ROOT / "figures",
+    "fig_html": _ROOT / "figures_html",
+}
+
+try:                                                             # ← [NEW]
+    _CFG = yaml.safe_load(_CFG_YAML.read_text()) if _CFG_YAML.exists() else {}
+    _PATHS = (_CFG or {}).get("paths", {}) if isinstance(_CFG, dict) else {}
+except Exception as _e:                                          # ← [NEW]
+    logging.warning("Could not load %s (%s) – using defaults", _CFG_YAML, _e)
+    _PATHS = {}
+
+_DATA      = Path(_PATHS.get("out_cur",  _DEFAULTS["out_cur"])).resolve()   # ← [NEW]
+_DIR_PNG   = Path(_PATHS.get("fig_png",  _DEFAULTS["fig_png"])).resolve()   # ← [NEW]
+_DIR_HTML  = Path(_PATHS.get("fig_html", _DEFAULTS["fig_html"])).resolve()  # ← [NEW]
+_PLOT_SPECS = _ROOT / "plot_specs.yaml"                                      # (unchanged)  # ← [CHG]
 
 
 def _load_specs() -> dict:

@@ -6,6 +6,26 @@ from numpy.random import Generator
 from typing import Final
 from typing import Tuple, Sequence
 from utils.ecb_params import ECBParams      
+from utils.skill_updater import update_skill
+
+from warnings import warn                                                      
+from utils.triage_utils import (                                   
+    bayes_posterior as _bayes_post,                              
+    triage_score   as _triage_score,                             
+)                  
+
+def bayes_update(*args, **kwargs):                                             # ← [NEW]
+    warn("screening_utils.bayes_update is deprecated; "
+         "use utils.triage_utils.bayes_posterior",                             # ← [NEW]
+         DeprecationWarning, stacklevel=2)                                     # ← [NEW]
+    return _bayes_post(*args, **kwargs)                                        # ← [NEW]
+
+def triage_score(*args, **kwargs):                                             # ← [NEW]
+    warn("screening_utils.triage_score is deprecated; "
+         "use utils.triage_utils.triage_score",                                # ← [NEW]
+         DeprecationWarning, stacklevel=2)                                     # ← [NEW]
+    return _triage_score(*args, **kwargs)                                      # ← [NEW]
+
 
 def gen_ideas(
     kai: float,
@@ -141,64 +161,6 @@ def screening_capacity(
 
     return psi_raw / (1.0 + params.eta_congestion * u_bar_mean)
 
-# ‣ REQ-TICK posterior update formula (μ̂, σ̂²) derived from N-N model
-def bayes_update(
-    signal: float,
-    mu_prior: float,
-    tau_prior: float,
-    sigma_signal: float,
-) -> Tuple[float, float]:
-    """
-    Computes the posterior mean *and* variance of idea quality given
-    a noisy signal under a Normal-Normal conjugate pair.
-
-        μ̂  = (τ² / (τ²+σ²)) · s  +  (σ² / (τ²+σ²)) · μ₀
-        σ̂² = (τ² · σ²) / (τ² + σ²)
-
-    Parameters
-    ----------
-    signal : float
-        Observed noisy signal *s*.
-    mu_prior : float
-        Prior mean μ₀.
-    tau_prior : float
-        Prior std-dev τ ( >0 ).
-    sigma_signal : float
-        Signal noise std-dev σ ( >0 ).
-
-    Returns
-    -------
-    (mu_post, var_post) : tuple[float,float]
-        Posterior expectation and variance.  `var_post ≥ 0`.
-    """
-    if tau_prior <= 0 or sigma_signal <= 0:
-        raise ValueError("tau_prior and sigma_signal must be > 0")
-
-    tau2, sigma2 = tau_prior ** 2, sigma_signal ** 2
-    weight = tau2 / (tau2 + sigma2)           # τ² / (τ²+σ²)
-    mu_post = weight * signal + (1.0 - weight) * mu_prior
-    var_post = (tau2 * sigma2) / (tau2 + sigma2)
-    return mu_post, var_post
-
-
-# ‣ REQ-TICK triage score with λ-explore · σ̂²
-def triage_score(
-    mu_post: float,
-    var_post: float,
-    lambda_explore: float,
-) -> float:
-    """
-    Creativity-weighted triage score:
-
-        T = μ̂  +  λ · σ̂²
-
-    λ > 0 favours variance (exploration); λ < 0 = conservative.
-    """
-    if var_post < 0:
-        raise ValueError("Posterior variance must be non-negative")
-    return mu_post + lambda_explore * var_post
-
-
 # ‣ REQ-TICK adaptive threshold helper (percentile or absolute)
 def compute_threshold(
     scores: Sequence[float],
@@ -225,4 +187,12 @@ def compute_threshold(
 
 psi_efficiency = screening_capacity     # alias for clarity
 theta_accuracy = theta_total           # alias for clarity
-__all__ = ["psi_efficiency", "theta_accuracy"]  # keep linters happy
+
+__all__ = [
+    "psi_efficiency",
+    "theta_accuracy",
+    "bayes_update",
+    "triage_score",
+    "compute_threshold",
+    "update_skill",                              
+]

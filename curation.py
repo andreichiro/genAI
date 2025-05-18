@@ -11,6 +11,8 @@ import numpy as np
 import validator  
 from pathlib import Path
 from collections import OrderedDict          # add to imports
+from data_portal import apply_sga_overlay, get_sga_overlay
+import logging
 
 _EXPECTED_ORDER: Final = [
     "scenario_id", "t", "firm_id",
@@ -28,6 +30,7 @@ _DERIVED_COLS: Final = [
     "congestion_idx",
     "market_share",
     "Y_lost_decay",
+    "sgna_cost",
 ]
 
 def tidy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -81,7 +84,7 @@ def _add_effective_skills(df: pd.DataFrame) -> pd.DataFrame:
         df["effective_skills"] = df["synergy"].astype("float64")
     return df
 
-def _add_queue_kpis(                             # ← REPLACE ENTIRE FUNCTION
+def _add_queue_kpis(                            
     df: pd.DataFrame,
     idea_log_path: Path = Path("outputs/idea_log.parquet"),
 ) -> pd.DataFrame:
@@ -165,12 +168,24 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     validator.SCHEMA.validate(raw, lazy=True)
 
     # 2) Transform pipeline
+    try:
+        overlay_df = get_sga_overlay()   # will raise FileNotFoundError if absent
+        _sgna_merge = lambda d: apply_sga_overlay(d, overlay_df)
+    except FileNotFoundError as err:
+        logging.warning("SG&A overlay not found (%s) – sgna_cost set to 0.", err)
+
+        def _sgna_merge(d: pd.DataFrame) -> pd.DataFrame:   # graceful fallback
+            d["sgna_cost"] = 0.0
+            return d
+
     df = (
         raw
             .pipe(_add_growth)
-            .pipe(_add_queue_kpis) 
-            .pipe(_add_market_and_decay)  
+            .pipe(_add_queue_kpis)
+            .pipe(_add_market_and_decay)
+            .pipe(_sgna_merge)            # always defined by the try/except
     )
+
 
     # 3) Re-order columns → core · derived · any extras
     base_cols = [c for c in raw.columns if c != "x_values"]
@@ -197,9 +212,9 @@ if __name__ == "__main__":        # CLI:  python -m curation  (optional)
 Lightweight tidy helper for the runner –
 tidy_dataframe() is called inside sim_runner so that large, multi-process runs can concatenate their individual DataFrames without dtype headaches.
 
-It simply re-orders a handful of “cheap” log columns, forces t into efficient int64, and guarantees that x_values is a proper NumPy array.
+It simply re-orders a handful of "cheap" log columns, forces t into efficient int64, and guarantees that x_values is a proper NumPy array.
 
-No deep validation happens here—that’s deferred to the main curate() pipeline.
+No deep validation happens here—that's deferred to the main curate() pipeline.
 
 2. Schema validation –
 The first thing curate() does is load outputs/simulations.parquet and pass it through validator.SCHEMA.
@@ -223,7 +238,7 @@ _add_intensity() adds two classic macro ratios: capital_intensity (K / L_Y) and 
 _add_effective_skills() multiplies synergy by the logistic multiplier produced in Phase G to create an effective_skills index. The function keeps backward compatibility by falling back to bare synergy if the logistic column is absent.
 
 5. Column ordering –
-A deterministic order is enforced: original “core” variables first, followed by all _DERIVED_COLS. Any experimental extras that future phases add are appended automatically, so nothing breaks.
+A deterministic order is enforced: original "core" variables first, followed by all _DERIVED_COLS. Any experimental extras that future phases add are appended automatically, so nothing breaks.
 
 6. Output artefacts –
 

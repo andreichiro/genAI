@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import pandera as pa
-from pandera import Column, Check
+import pandera.pandas as pa
+from pandera.pandas import Column, Check
 
 # DataFrameSchema 
 
@@ -22,7 +22,13 @@ SCHEMA = pa.DataFrameSchema(
         # ── optional / derived ────────────────────────────────────────────
         "mean_latency": Column(float, Check.ge(0), nullable=True),
         "p95_latency":  Column(float, Check.ge(0), nullable=True),
+        "max_latency":     Column(float, Check.ge(0), nullable=True),  # tail-risk queue wait
+        "std_latency":     Column(float, Check.ge(0), nullable=True),  # dispersion of waits
+        "creativity_loss": Column(float, nullable=True, required=False),  # ΔY from idea decay
+        "triage_eff":      Column(float, [Check.ge(0), Check.le(1)], nullable=True),  # accepted/total
         "market_share": Column(float, Check.in_range(0, 1), nullable=True),
+        "sgna_cost": Column(float, Check.ge(0), nullable=True, required=False),
+
     },
     coerce=True,
     strict=False,              # allow future experimental columns

@@ -14,7 +14,7 @@ def solve_investments(
     mp_nf: float,           # ∂Π/∂U_nf  – marginal product of non-fungible eval capital
     mp_skill: float = 0.0,          
     min_allocation: float = 0.0
-) -> Tuple[float, float, float]:
+) -> Tuple[float, float, float, float]:
     """
     Split available cash across three investment buckets proportionally
     to (clipped) *current* marginal products – a myopic rule that ignores
@@ -35,10 +35,11 @@ def solve_investments(
         zero.  Defaults to 0.  Must satisfy 3·min_allocation ≤ cash.
 
     Returns
-    -------
-    Tuple[float, float, float]
-        (I_gpu, I_f, I_nf) – investment flows for the three assets.
-
+    Tuple[float, float, float, float]
+        (I_gpu, I_f, I_nf, I_train) – cash allocated to GPU capacity,
++        fungible capital, non-fungible capital, and evaluator-training
++        respectively.
+    
     Raises
     ------
     ValueError
@@ -48,7 +49,7 @@ def solve_investments(
         raise ValueError("cash must be non-negative")
     if min_allocation < 0:
         raise ValueError("min_allocation must be ≥ 0")
-    if 3 * min_allocation > cash:
+    if 4 * min_allocation > cash:    
         raise ValueError("min_allocation too large for given cash pool")
 
     #  clip & normalise marginal products 
@@ -62,7 +63,7 @@ def solve_investments(
     residual_cash = cash - 4 * min_allocation
 
     if residual_cash <= 0 or sum(weights) == 0:
-        # Either no extra money or all MPs zero ⇒ equal split of minima
+         # Either no extra money or all MPs zero ⇒ equal split of minima (4 buckets)
         return (min_allocation, min_allocation, min_allocation)
 
     weight_sum = float(sum(weights))

@@ -22,6 +22,10 @@ from typing import Tuple
 
 from utils.ecb_params import ECBParams
 
+def new_pipeline(p: ECBParams) -> deque[float]:                           # ← [NEW]
+    """Return a deque of length `p.education_lag` filled with zeros."""   # ← [NEW]
+    return deque([0.0] * p.education_lag, maxlen=p.education_lag)        # ← [NEW]
+
 
 def update_supply(
     *,
@@ -48,13 +52,20 @@ def update_supply(
         • S_new   – trainee stock after enrolment/retirement
         • grads   – head-count of newly graduated evaluators
     """
-    assert len(pipeline) == p.education_lag
+    if S_prev < 0:
+        raise ValueError("S_prev must be ≥ 0")
+    if len(pipeline) != p.education_lag:                                  
+        raise ValueError("`pipeline` length must equal p.education_lag")  
 
     # 1. graduates leave the right-hand end
-    grads = pipeline.pop()            # 0 if lag=0
-    # 2. new enrollees move into slot 0
+    if p.education_lag > 0:                                            
+        grads = pipeline.pop()                                          
+    else:                                                            
+        grads = 0.0                                                    
+
     new_enrol = p.enroll_rate * S_prev + p.enroll_const
-    pipeline.appendleft(new_enrol)
+    if p.education_lag > 0:                                            
+        pipeline.appendleft(new_enrol)                                  
 
     # 3. trainee stock evolves with enrolment – retirement
     S_after_enrol = S_prev - grads + new_enrol

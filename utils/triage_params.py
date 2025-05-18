@@ -20,7 +20,7 @@ from dataclasses import dataclass
 @dataclass(slots=True, frozen=True)
 class TriageParams:
     # ------------------------------------------------------------- noise & priors
-    sigma_signal:   float = 1.0       # σ  > 0
+    sigma_noise:   float = 1.0       # σ  > 0
     tau_prior:      float = 1.0       # τ₀ > 0
 
     # ------------------------------------------------------------- exploration
@@ -40,3 +40,14 @@ class TriageParams:
             raise ValueError("threshold_rule must be 'percentile' or 'absolute'")
         if self.threshold_rule == "percentile" and not (0.0 <= self.threshold_value <= 100.0):
             raise ValueError("percentile threshold_value must be in [0,100]")
+
+    @property
+    def sigma_signal(self) -> float:                           # pragma: no cover
+        import warnings
+        warnings.warn(
+            "TriageParams.sigma_signal is deprecated; "
+            "use sigma_noise instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.sigma_noise

@@ -31,7 +31,7 @@ import pandas as pd
 from utils.ecb_params import ECBParams
 from utils.mobility_utils import poach_evaluators
 from collections import deque 
-from utils.edu_updater    import update_supply    # ← NEW
+from utils.edu_updater    import update_supply   
 
 from joblib import Parallel, delayed
 try:                                        # progress bar is nice but optional
@@ -43,8 +43,25 @@ except ImportError:                         # pragma: no cover
 from utils.ecb_firm_step import ecb_firm_step     
 from scenarios import ScenarioECB
 from utils.queue_dynamics import new_queue 
+import hashlib    
+from microfoundations.spillovers import knowledge_spillover
+from microfoundations.entry_exit import check_exit, plan_entries     
+
 
 __all__ = ["run_ecb", "FirmECBState", "run_mean_field_sim"]
+
+def _stable_uint32(token: str | int | None, *, global_seed: int | None) -> int:  # ← [NEW]
+    """
+    Return a **deterministic** 32-bit integer seed.
+
+    • If *global_seed* is given, combine it with *token* via MD5 so that
+      every scenario draws an **independent** stream while staying
+      reproducible across Python versions / platforms.
+    • Without *global_seed* we fall back to MD5 of *token* alone.
+    """
+    base_str = f"{global_seed}_{token}" if global_seed is not None else str(token)
+    digest   = hashlib.md5(base_str.encode("utf-8")).hexdigest()      # 128-bit hex
+    return int(digest[:8], 16)                                        # first 32 bits
 
 # 1 ▸ *Per-firm* mutable container updated each period
 @dataclass(slots=True)
@@ -64,8 +81,8 @@ class FirmECBState:
     # attach the scenario’s immutable parameter bundle
     ecb:      ECBParams = ECBParams()
     # Convenient derived — updated by `update_U_tot()` each tick
-    U_tot:    float     = 0.0
-
+    U_tot:    float     = 0.0   
+    roa_hist: deque = field(default_factory=lambda: deque(maxlen=3))
     # -----------------------------------------------------------------
     def update_U_tot(self) -> None:
         """Re-compute U_tot from the three capital stocks."""
@@ -76,7 +93,7 @@ class FirmECBState:
 
 
 # 2 Signature of the user-supplied per-period micro step
-StepFunc = Callable[[int, FirmECBState, float], Dict[str, float]]
+StepFunc = Callable[[int, FirmECBState, float, float], Dict[str, float]]
 # The float argument is U_external_prev (mean capital previous period).
 # The dict it returns will be concatenated into a long DataFrame.
 
@@ -150,17 +167,24 @@ def run_mean_field_sim(
     else:
         U_external_series: List[float] = [float(np.mean([f.U_tot for f in firm_states]))]  # t = −1
 
+    prev_Y_tot: float = np.nan 
+    
     # main loop 
     for t in range(num_periods):
         U_external_prev = U_external_series[-1]
+
+        #  Ω(t) : inter-firm knowledge spill-overs this period
+        tau  = getattr(p_ecb, "tau_spillover", 0.0)          # default 0
+        omega = knowledge_spillover([f.Unf for f in firm_states], tau)
+
 
         period_rows: List[Dict[str, float]] = []        # buffer to add market_share
         wages: Dict[int, float] = {}                    # for evaluator mobility
         Y_vals: List[float] = []                        # collect for ΣY
 
         for state in firm_states:
-            kpi = step_func(t, state, U_external_prev)    
-            I_train = kpi.get("I_train")            # ← NEW optional KPI
+            kpi = step_func(t, state, U_external_prev, omega)   
+            I_train = kpi.get("I_train")            # optional KPI
             if I_train:
                 trainee_stock += float(I_train)
 
@@ -171,21 +195,55 @@ def run_mean_field_sim(
             Y_now = kpi.get("Y_new")
             if Y_now is not None:
                 Y_vals.append(float(Y_now))
+
+            # push Return-on-Assets sample to the deque 
+            roa_val = (Y_now or 0.0) / max(state.K_AI, 1e-6)
+            state.roa_hist.append(roa_val)
+
             period_rows.append({"firm_id": state.firm_id, "t": t, **kpi})
 
-        # evaluator mobility (strategic poaching) – only if ε>0
+        # sector output 
+        Y_tot = sum(Y_vals)                     # needed for Δln Q below
+
+        #  exit & entry  
+        exiting = [st for st in firm_states if check_exit(st.roa_hist)]
+        if exiting:
+            logging.info("t=%d  firm exits ↯  %s",
+                         t, [st.firm_id for st in exiting])
+            firm_states = [st for st in firm_states if st not in exiting]
+            for st in exiting:                  # remove stale wage quotes
+                wages.pop(st.firm_id, None)
+
+        demand_growth = 0.0
+        if np.isfinite(prev_Y_tot) and prev_Y_tot > 0 and Y_tot > 0:
+            demand_growth = float(np.log(Y_tot) - np.log(prev_Y_tot))
+        n_entry = plan_entries(demand_growth, rng=np.random.default_rng())
+        if n_entry > 0:
+            next_id = 1 + max((st.firm_id for st in firm_states), default=-1)
+            logging.info("t=%d  new entrants ➜ %d", t, n_entry)
+            for j in range(n_entry):
+                st_new = FirmECBState(
+                    firm_id=next_id + j,
+                    Uf=0.0, Unf=0.0, Hnf=0.0,
+                    K_AI=1.0,
+                    queue=new_queue(),
+                    ecb=p_ecb,
+                )
+                st_new.update_U_tot()
+                firm_states.append(st_new)
+
+        # -------- evaluator mobility ------------------------------------
         if mobility_elasticity > 0.0 and wages:
             poach_evaluators(firm_states, wages, mobility_elasticity)
 
-        # 2️⃣  market-share post-processing
-        Y_tot = sum(Y_vals)
+        # -------- market-share post-processing --------------------------
+
         for row in period_rows:
             Y_i = row.get("Y_new")
             row["market_share"] = (Y_i / Y_tot) if (Y_i is not None and Y_tot > 0) else np.nan
             rows.append(row)
 
-
-        # 2️⃣  compute *current* mean for next period’s call
+        # compute *current* mean for next period’s call
 
         if shared_pool:
             U_external_now = float(np.sum([f.U_tot for f in firm_states]))
@@ -210,6 +268,8 @@ def run_mean_field_sim(
                 t, shared_pool, U_external_prev, U_external_now
             )
     
+        prev_Y_tot = Y_tot             
+    
     # tail diagnostics 
     tail95 = np.percentile(U_external_series, 95)
     logging.info("Φ(t) tail-95 = %.3f  (max %.3f)",
@@ -224,15 +284,19 @@ def run_mean_field_sim(
                      out_csv.as_posix(), len(df))
     return df
 
-
-def _run_single_scenario(scn) -> pd.DataFrame:            # ScenarioECB
+def _run_single_scenario(scn, *, global_seed: int | None = None) -> pd.DataFrame:  
     """Run one ScenarioECB through the mean-field engine and tag rows."""
     states = _make_states(scn.firms_init, scn.ecb_params)
 
-    rng = np.random.default_rng(hash(scn.id) & 0xFFFFFFFF)
-
+    rng_seed = _stable_uint32(scn.id, global_seed=global_seed) 
+    rng      = np.random.default_rng(rng_seed)     
+    
     # wrap the Phase-B micro-step so it sees the scenario’s RNG & triage knobs
-    def _step(t_tick: int, state: FirmECBState, U_ext_prev: float):
+    def _step(t_tick: int,
+              state: FirmECBState,
+              U_ext_prev: float,
+              omega: float):
+
         return ecb_firm_step(
             t               = t_tick,
             state           = state,
@@ -240,6 +304,7 @@ def _run_single_scenario(scn) -> pd.DataFrame:            # ScenarioECB
             U_bar_others    = U_ext_prev,
             rng             = rng,
             triage_params   = scn.triage_params,
+            mu_spill        = omega,    
         )
     df = run_mean_field_sim(
         firm_states        = states,
@@ -255,6 +320,7 @@ def run_ecb(
     scenarios: Sequence["ScenarioECB"],        # string literal → avoids import cycle
     *,
     jobs: int = -1,
+    seed_global: int | None = None,  
 ) -> pd.DataFrame:
     """
     Phase-D convenience wrapper used by sim_runner.py.
@@ -263,9 +329,13 @@ def run_ecb(
     the long-format outputs.  Parallelism is fully optional.
     """
     if jobs == 1:
-        dfs = [_run_single_scenario(s) for s in tqdm(scenarios, desc="ECB runs")]
+        dfs = [
+            _run_single_scenario(s, global_seed=seed_global)           # ← [CHG]
+            for s in tqdm(scenarios, desc="ECB runs")
+        ]
     else:
-        dfs = Parallel(n_jobs=jobs, backend="loky")(
-            delayed(_run_single_scenario)(s) for s in tqdm(scenarios, desc="ECB runs")
+        dfs = Parallel(n_jobs=jobs, backend="loky")(                   # ← [CHG]
+            delayed(_run_single_scenario)(s, global_seed=seed_global)
+            for s in tqdm(scenarios, desc="ECB runs")
         )
     return pd.concat(dfs, ignore_index=True)

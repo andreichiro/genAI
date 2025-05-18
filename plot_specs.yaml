@@ -53,3 +53,12 @@ market_share:
   ylabel: "Share of total Y"
   log_y: false
   
+max_latency:
+  title: "Max Queue Latency"
+  ylabel: "Max latency (periods)"
+  log_y: false
+
+std_latency:
+  title: "Latency Std-Dev"
+  ylabel: "Std latency (periods)"
+  log_y: false

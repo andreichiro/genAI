@@ -25,10 +25,8 @@ from typing import Tuple
 __all__ = [
     "bayes_posterior",
     "triage_score",
+    "apply_threshold",    
 ]
-
-# ---------------------------------------------------------------------------
-
 
 def bayes_posterior(
     *,
@@ -69,6 +67,43 @@ def bayes_posterior(
     var_post  = (tau2 * sigma2) / denom
     return float(mu_post), float(var_post)
 
+def apply_threshold(                               # ← [NEW] new helper
+    scores: np.ndarray,
+    *,
+    rule: str,
+    value: float,
+) -> np.ndarray:
+    """
+    Vectorised triage gate.
+
+    Parameters
+    ----------
+    scores : np.ndarray
+        Array of triage scores  *T*  (shape: N,).
+    rule : {"percentile", "absolute"}
+        *percentile* – keep  scores >= np.percentile(scores, value)  
+        *absolute*   – keep  scores >= value
+    value : float
+        Percentile (0–100) or absolute cut-off, depending on *rule*.
+
+    Returns
+    -------
+    np.ndarray[bool]
+        Boolean mask of accepted ideas, same shape as *scores*.
+    """
+    if scores.ndim != 1:
+        raise ValueError("scores must be a 1-D array")
+
+    if rule == "percentile":
+        if not (0.0 <= value <= 100.0):
+            raise ValueError("percentile must be in [0, 100]")
+        cutoff = float(np.percentile(scores, value))
+    elif rule == "absolute":
+        cutoff = float(value)
+    else:
+        raise ValueError(f"unknown threshold_rule '{rule}'")
+
+    return scores >= cutoff
 
 def triage_score(
     *,

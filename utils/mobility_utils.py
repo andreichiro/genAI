@@ -23,6 +23,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:                      
     from multifirm_runner import FirmECBState
 
+__all__: list[str] = [                             # ← [NEW]
+    "poach_evaluators",                           # ← [NEW]
+    "rival_eval_mean",      
+]
+
 def poach_evaluators(
     firm_states: Sequence[FirmECBState],
     wages: Dict[int, float],
@@ -60,3 +65,41 @@ def poach_evaluators(
         w_bar,
         sum(elasticity * g for g in gaps.values()),
     )
+
+def rival_eval_mean(
+    firm_states: Sequence[FirmECBState],
+    *,
+    xi1: float,
+    zeta_skill_exp: float,
+) -> Dict[int, float]:
+    """
+    For every firm *i* compute the **average** evaluation capital of its
+    rivals (all other firms):
+
+        Ū_{–i} = mean_j≠i [ Uf_j  +  ξ₁ · Unf_j · Hnf_j^ζ ]
+
+    The caller feeds *xi1* and *zeta_skill_exp* straight from
+    ``ECBParams`` so this helper stays parameter-agnostic.
+
+    Returns a mapping ``{firm_id → Ū_{–i}}`` ready to plug into
+    *screening_utils.screening_capacity*.
+    """
+    n = len(firm_states)
+    if n == 0:
+        return {}
+
+    # pre-compute each firm’s total evaluation capital
+    totals = {
+        st.firm_id: st.Uf + xi1 * st.Unf * (st.Hnf ** zeta_skill_exp)
+        for st in firm_states
+    }
+
+    sum_all = sum(totals.values())
+    u_bar: Dict[int, float] = {}
+    for st in firm_states:
+        if n == 1:
+            u_bar[st.firm_id] = 0.0
+        else:
+            u_bar[st.firm_id] = (sum_all - totals[st.firm_id]) / (n - 1)
+
+    return u_bar

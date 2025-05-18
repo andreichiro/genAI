@@ -20,15 +20,15 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from utils.triage_utils import bayes_posterior
-
+from utils.triage_utils import bayes_posterior, triage_score
+from utils.screening_utils import compute_threshold
 from collections import namedtuple
 
 # Convenience alias for the queue’s element type
 IdeaTuple      = Tuple[int, float, float, float]          # (t_arrival, μ̂, σ̂², v₀)
 IdeaEvalTuple  = Tuple[int, int, float, float, float]     # (t_arrival, t_eval, μ̂, σ̂², v₀)
-LatencyStats = namedtuple("LatencyStats", ["count", "mean", "p95"])
 
+LatencyStats = namedtuple("LatencyStats", ["count", "mean", "p95", "max", "std"])    
 
 def enqueue(
     q: Deque[IdeaTuple],
@@ -83,7 +83,8 @@ def enqueue_new_ideas(
     rng: np.random.Generator,
     v0_mu: float = 1.0,
     v0_sigma: float = 0.0,
-) -> None:                                # ← lambda_weight arg removed
+    triage_params=None,           
+) -> float:                                # ← lambda_weight arg removed
     """
     Convenience wrapper used by `ecb_firm_step`.
 
@@ -93,12 +94,11 @@ def enqueue_new_ideas(
     • Injects them into the queue with a log-normal base value v₀.
     """
     if n <= 0:
-        return
-
+        return float("nan") 
     v_true  = rng.normal(loc=mu_prior, scale=tau_prior, size=n)
     signals = v_true + rng.normal(0.0, sigma_noise, size=n)
 
-    mu_posts, var_posts = [], []
+    mu_posts, var_posts, scores = [], [], []                            
     for s in signals:
         μ̂, σ̂2 = bayes_posterior(
             signal=s,
@@ -108,9 +108,34 @@ def enqueue_new_ideas(
         )
         mu_posts.append(μ̂)
         var_posts.append(σ̂2)
+        if triage_params is not None:                                   
+            scores.append(                                               
+                triage_score(mu_post=μ̂,                                 
+                             var_post=σ̂2,                               
+                             lambda_weight=triage_params.lambda_explore) 
+            )                                                            
 
-    v0s = rng.lognormal(mean=v0_mu, sigma=v0_sigma, size=n)
-    enqueue(queue, t_arrival, mu_posts, var_posts, v0s)
+    triage_eff = np.nan                                                   ### NEW
+    if triage_params is not None:                                         ### NEW
+        cutoff = compute_threshold(                                       ### NEW
+            scores,                                                       ### NEW
+           rule = triage_params.threshold_rule,                          ### NEW
+            value= triage_params.threshold_value,                         ### NEW
+        )                                                                 ### NEW
+        keep = [i for i,s in enumerate(scores) if s >= cutoff]            ### NEW
+        triage_eff = len(keep) / n                                        ### NEW
+        if not keep:                                                      ### NEW
+            return triage_eff                                             ### NEW
+        mu_posts  = [mu_posts[i]  for i in keep]                          ### NEW
+        var_posts = [var_posts[i] for i in keep]                          ### NEW
+        # regenerate v0 only for survivors                                ### NEW
+        v0s = rng.lognormal(mean=v0_mu, sigma=v0_sigma, size=len(keep))   ### NEW
+    else:                                                                 ### NEW
+        v0s = rng.lognormal(mean=v0_mu, sigma=v0_sigma, size=n)           ### NEW
+
+    enqueue(queue, t_arrival, mu_posts, var_posts, v0s)                   ### CHG
+    return triage_eff                                                     ### NEW
+
 
 def update_queue(
     q: Deque[IdeaTuple],
@@ -191,6 +216,8 @@ def service_queue_fifo(
         count=len(waits),
         mean=np.mean(waits) if waits else np.nan,
         p95=np.percentile(waits, 95) if waits else np.nan,
+        max=np.max(waits) if waits else np.nan,
+        std=np.std(waits, ddof=0) if waits else np.nan,
     )
     return served, stats
 

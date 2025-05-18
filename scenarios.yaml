@@ -17,6 +17,13 @@ defaults:
   skill_interaction_strength: 0.0
 
 
+  paths:
+    out_raw:   "outputs/simulations.parquet"        # ← [NEW]
+    out_cur:   "outputs/simulations_curated.parquet"  # ← [NEW]
+    fig_png:   "figures/"                           # ← [NEW]
+    fig_html:  "figures_html/"                      # ← [NEW]
+    tables:    "tables/"                            # ← [NEW]
+
   ecb_params:                
     psi0:               0.0
     psi_max:            10.0
@@ -32,7 +39,7 @@ defaults:
     mobility_elasticity: 0.0
     shared_pool:        false
   triage_params:               
-    sigma_signal:    1.0
+    sigma_noise:     1.0 
     tau_prior:       1.0
     lambda_explore:  0.0
     threshold_rule:  percentile
