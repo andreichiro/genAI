@@ -108,10 +108,8 @@ def _add_queue_kpis(
         "mean_latency", "p95_latency", "max_latency", "std_latency",
         "creativity_loss", "triage_eff", "ROI_skill",
     ):
-            df[col] = df[f"{col}_new"].combine_first(df[col])
-            df.drop(columns=f"{col}_new", inplace=True)
-
-
+        if col not in df.columns:
+            df[col] = np.nan
 
     # nothing to merge – return early 
     if not idea_log_path.exists():
@@ -148,10 +146,8 @@ def _add_queue_kpis(
         df = df.merge(stats, how="left", on=["scenario_id", "t"])
         for col in ("mean_latency", "p95_latency",  
                     "max_latency", "std_latency"):       
-                         
-            if col not in df.columns:
-                df[col] = np.nan
-
+            df[col] = df[f"{col}_new"].combine_first(df[col])
+            df.drop(columns=f"{col}_new", inplace=True, errors="ignore")
 
     return df
 
