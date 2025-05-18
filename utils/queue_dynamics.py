@@ -195,7 +195,12 @@ def service_queue_fifo(
     rng: np.random.Generator | None = None,
     idea_log: List[IdeaEvalTuple] | None = None,
     eta_decay: float = 0.0,       
-) -> Tuple[List[IdeaEvalTuple] | List[IdeaTuple], LatencyStats]:
+) -> Tuple[
+        List[IdeaEvalTuple] | List[IdeaTuple],
+        LatencyStats,
+        float                                           
+    ]:
+
     """
     Wrapper expected by `ecb_firm_step`. Supports *fractional* Ψ_eff:
     dequeue ⌊capacity⌋ ideas plus one extra with probability = frac(capacity).
@@ -227,8 +232,7 @@ def service_queue_fifo(
         std=np.std(waits, ddof=0) if waits else np.nan,
         decay_loss=decay_loss, 
     )
-    return served, stats
-
+    return served, stats, decay_loss
 
 def latency(
     ideas: Iterable[IdeaTuple],

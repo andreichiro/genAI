@@ -70,16 +70,13 @@ def ecb_firm_step(
 
 
     # 3) Service the FIFO idea queue ----------------------------------------
-    served, latency_stats = service_queue_fifo(queue=state.queue,
+    served, latency_stats, decay_loss = service_queue_fifo(queue=state.queue,
                                                capacity=psi_eff,
                                                t_now    = t,   
                                                rng=rng,
                                                idea_log=None,
                                                eta_decay=params.eta_decay,                    
                                                )
-
-    decay_loss      = latency_stats.decay_loss
-    Y_nominal       = np.float64(unit_price * quantity + decay_loss)
 
     # 4) Production 
     quantity = ces_output(
@@ -88,11 +85,10 @@ def ecb_firm_step(
         p      = CESParams(),            #(defaults α=0.35, ρ=−0.5, A=1)
     )
 
-
     # map quantity → price via inverse-demand curve\
     unit_price = price_at_quantity(quantity)                 # default P_max=10, etc.
     Y = unit_price * quantity                                # revenue = P·Q
-
+    Y_nominal = Y + decay_loss  
 
     # 5) Capital & skill updates --------------------------------------------
     state.Uf   *= (1.0 - params.delta_Uf)
