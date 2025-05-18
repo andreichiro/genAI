@@ -73,7 +73,13 @@ def ecb_firm_step(
     served, latency_stats = service_queue_fifo(queue=state.queue,
                                                capacity=psi_eff,
                                                t_now    = t,   
-                                               rng=rng)
+                                               rng=rng,
+                                               idea_log=None,
+                                               eta_decay=params.eta_decay,                    
+                                               )
+
+    decay_loss      = latency_stats.decay_loss
+    Y_nominal       = np.float64(unit_price * quantity + decay_loss)
 
     # 4) Production 
     quantity = ces_output(
@@ -93,11 +99,12 @@ def ecb_firm_step(
     state.Unf  *= (1.0 - params.delta_Unf)
     state.Hnf   = (1.0 - params.delta_H) * state.Hnf  + params.mu_learning * psi_eff
 
-    # 6) Return KPIs ---------------------------------------------------------
+    # 6) Return KPIs 
     return {
         "t":             t,
         "firm_id":       state.firm_id,
         "Y_new":         Y,
+        "Y_new_nominal":  Y_nominal,    
         "congestion_idx": U_bar_others, 
         "psi_eff":       psi_eff,
         "theta":         theta,
@@ -105,7 +112,8 @@ def ecb_firm_step(
         "mean_latency":  latency_stats.mean if latency_stats.count else np.nan,
         "p95_latency":   latency_stats.p95  if latency_stats.count else np.nan,
         "max_latency":   latency_stats.max  if latency_stats.count else np.nan,  
-        "std_latency":   latency_stats.std  if latency_stats.count else np.nan,   
+        "std_latency":   latency_stats.std  if latency_stats.count else np.nan,  
+        "creativity_loss": decay_loss, 
         "triage_eff":    triage_eff,    
         "omega_spill":   mu_spill,                                          
     }

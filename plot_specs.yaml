@@ -64,3 +64,8 @@ y_new_tot:
   title: "Aggregate Output Yₜ"
   ylabel: "Y (output)"
   log_y: true      # keep log-scale
+
+Y_new_nominal:
+  title: "Nominal Output (no decay)"
+  ylabel: "Y_nominal"
+  log_y: true

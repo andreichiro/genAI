@@ -35,7 +35,19 @@ _DERIVED_COLS: Final = [
     "Y_lost_decay",
     "y_new_tot",
     "sgna_cost",
+    "capital_intensity",        
+    "rd_share",                 
+    "effective_skills",        
+    "x_sum",
+    "x_varieties",     
 ]
+
+def _flatten_x(df: pd.DataFrame) -> pd.DataFrame:        
+    if "x_values" not in df.columns:
+        return df
+    df["x_sum"]       = df["x_values"].apply(np.sum).astype("float64")
+    df["x_varieties"] = df["x_values"].apply(len).astype("int64")
+    return df.drop(columns="x_values")
 
 def tidy_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -216,7 +228,10 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
 
     df = (
         raw
+            .pipe(_flatten_x) 
             .pipe(_add_growth)
+            .pipe(_add_intensity)            
+            .pipe(_add_effective_skills)    
             .pipe(_add_queue_kpis)
             .pipe(_add_market_and_decay)
             .pipe(_sgna_merge)    

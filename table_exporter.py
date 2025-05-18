@@ -19,8 +19,8 @@ _METRICS = [
     "y_growth_pct",
     "capital_intensity",
     "rd_share",
-    "Creativity_loss",   
-    "Triage_eff",       
+    "creativity_loss",   
+    "triage_eff",       
     "market_share",
     "Y_lost_decay",
 ]

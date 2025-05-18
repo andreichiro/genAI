@@ -28,7 +28,7 @@ from collections import namedtuple
 IdeaTuple      = Tuple[int, float, float, float]          # (t_arrival, μ̂, σ̂², v₀)
 IdeaEvalTuple  = Tuple[int, int, float, float, float]     # (t_arrival, t_eval, μ̂, σ̂², v₀)
 
-LatencyStats = namedtuple("LatencyStats", ["count", "mean", "p95", "max", "std"])    
+LatencyStats = namedtuple("LatencyStats", ["count", "mean", "p95", "max", "std", "decay_loss"])    
 
 def enqueue(
     q: Deque[IdeaTuple],
@@ -115,26 +115,26 @@ def enqueue_new_ideas(
                              lambda_weight=triage_params.lambda_explore) 
             )                                                            
 
-    triage_eff = np.nan                                                   ### NEW
-    if triage_params is not None:                                         ### NEW
-        cutoff = compute_threshold(                                       ### NEW
-            scores,                                                       ### NEW
-           rule = triage_params.threshold_rule,                          ### NEW
-            value= triage_params.threshold_value,                         ### NEW
-        )                                                                 ### NEW
-        keep = [i for i,s in enumerate(scores) if s >= cutoff]            ### NEW
-        triage_eff = len(keep) / n                                        ### NEW
-        if not keep:                                                      ### NEW
-            return triage_eff                                             ### NEW
-        mu_posts  = [mu_posts[i]  for i in keep]                          ### NEW
-        var_posts = [var_posts[i] for i in keep]                          ### NEW
-        # regenerate v0 only for survivors                                ### NEW
-        v0s = rng.lognormal(mean=v0_mu, sigma=v0_sigma, size=len(keep))   ### NEW
-    else:                                                                 ### NEW
-        v0s = rng.lognormal(mean=v0_mu, sigma=v0_sigma, size=n)           ### NEW
+    triage_eff = np.nan                                                   
+    if triage_params is not None:                                      
+        cutoff = compute_threshold(                                     
+            scores,                                                     
+           rule = triage_params.threshold_rule,                       
+            value= triage_params.threshold_value,                      
+        )                                                                
+        keep = [i for i,s in enumerate(scores) if s >= cutoff]          
+        triage_eff = len(keep) / n                                      
+        if not keep:                                               
+            return triage_eff                                             
+        mu_posts  = [mu_posts[i]  for i in keep]                       
+        var_posts = [var_posts[i] for i in keep]                          
+        # regenerate v0 only for survivors                               
+        v0s = rng.lognormal(mean=v0_mu, sigma=v0_sigma, size=len(keep))  
+    else:                                                                
+        v0s = rng.lognormal(mean=v0_mu, sigma=v0_sigma, size=n)          
 
-    enqueue(queue, t_arrival, mu_posts, var_posts, v0s)                   ### CHG
-    return triage_eff                                                     ### NEW
+    enqueue(queue, t_arrival, mu_posts, var_posts, v0s)                  
+    return triage_eff                                                   
 
 
 def update_queue(
@@ -194,6 +194,7 @@ def service_queue_fifo(
     t_now: int | None = None,
     rng: np.random.Generator | None = None,
     idea_log: List[IdeaEvalTuple] | None = None,
+    eta_decay: float = 0.0,       
 ) -> Tuple[List[IdeaEvalTuple] | List[IdeaTuple], LatencyStats]:
     """
     Wrapper expected by `ecb_firm_step`. Supports *fractional* Ψ_eff:
@@ -212,12 +213,19 @@ def service_queue_fifo(
         served.extend(update_queue(queue, 1, t_eval=t_now, idea_log=idea_log))
 
     waits = [t_now - t_arr for t_arr, *_ in served] if t_now is not None else []
+    decay_loss = 0.0
+    if eta_decay > 0.0 and t_now is not None:
+       for t_arr, *_ , v0 in served:
+           wait = t_now - t_arr
+           decay_loss += v0 * (1.0 - np.exp(-eta_decay * wait))
+
     stats = LatencyStats(
         count=len(waits),
         mean=np.mean(waits) if waits else np.nan,
         p95=np.percentile(waits, 95) if waits else np.nan,
         max=np.max(waits) if waits else np.nan,
         std=np.std(waits, ddof=0) if waits else np.nan,
+        decay_loss=decay_loss, 
     )
     return served, stats
 
