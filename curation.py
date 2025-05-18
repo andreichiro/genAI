@@ -257,7 +257,7 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
 
 
     # 3) Re-order columns → core · derived · any extras
-    base_cols = [c for c in raw.columns if c != "x_values"]
+    base_cols = [c for c in df.columns if c != "x_values"]  # use post-pipeline cols
     ordered_unique_cols = list(OrderedDict.fromkeys(base_cols + _DERIVED_COLS))
     df = df[ordered_unique_cols]
 
