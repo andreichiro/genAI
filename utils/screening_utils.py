@@ -8,23 +8,29 @@ from typing import Tuple, Sequence
 from utils.ecb_params import ECBParams      
 from utils.skill_updater import update_skill
 
-from warnings import warn                                                      
+import warnings                                                      
 from utils.triage_utils import (                                   
     bayes_posterior as _bayes_post,                              
     triage_score   as _triage_score,                             
 )                  
 
-def bayes_update(*args, **kwargs):                                             # ← [NEW]
-    warn("screening_utils.bayes_update is deprecated; "
-         "use utils.triage_utils.bayes_posterior",                             # ← [NEW]
-         DeprecationWarning, stacklevel=2)                                     # ← [NEW]
-    return _bayes_post(*args, **kwargs)                                        # ← [NEW]
+def bayes_update(*args, **kwargs):                                        
+    warnings.warn(                                                            
+        "screening_utils.bayes_update is deprecated; "
+        "use utils.triage_utils.bayes_posterior",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _bayes_post(*args, **kwargs)                                     
 
-def triage_score(*args, **kwargs):                                             # ← [NEW]
-    warn("screening_utils.triage_score is deprecated; "
-         "use utils.triage_utils.triage_score",                                # ← [NEW]
-         DeprecationWarning, stacklevel=2)                                     # ← [NEW]
-    return _triage_score(*args, **kwargs)                                      # ← [NEW]
+def triage_score(*args, **kwargs):                                            
+    warnings.warn(                                                            
+        "screening_utils.triage_score is deprecated; "
+        "use utils.triage_utils.triage_score",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _triage_score(*args, **kwargs)                                     
 
 
 def gen_ideas(
@@ -167,23 +173,16 @@ def compute_threshold(
     rule: str = "percentile",
     value: float = 0.0,
 ) -> float:
-    """
-    Returns the triage cut-off *T̄* according to the chosen rule.
-
-    • rule="percentile": `value` interpreted as a 0-100 percentile.
-    • rule="absolute"  : `value` used verbatim.
-    """
+    warnings.warn(
+        "screening_utils.compute_threshold is deprecated; "
+        "use utils.triage_utils.apply_threshold for Boolean masks "
+        "or migrate to the Scenario YAML threshold rules.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not scores:
         return float("inf")          # empty batch → nothing selected
 
-    if rule == "percentile":
-        if not (0.0 <= value <= 100.0):
-            raise ValueError("percentile must be in [0,100]")
-        return float(np.percentile(scores, value))
-    elif rule == "absolute":
-        return float(value)
-    else:
-        raise ValueError(f"Unknown threshold rule '{rule}'")
 
 psi_efficiency = screening_capacity     # alias for clarity
 theta_accuracy = theta_total           # alias for clarity

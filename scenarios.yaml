@@ -47,6 +47,42 @@ defaults:
     threshold_rule:  percentile
     threshold_value: 50.0
 
+  lookup_tables:                              # central numeric dictionaries
+    invest_patterns:                          # R&D regimes A–J
+      A: {invest_rate: 0.20}                  # huge constant
+      B: {invest_rate: 0.10}                  # moderate constant
+      C: {invest_rate: 0.03}                  # low constant
+      D: {front_load: 0.20, back_load: 0.00, t_switch: 10}
+      E: {front_load: 0.10, back_load: 0.00, t_switch: 10}
+      F: {front_load: 0.03, back_load: 0.00, t_switch: 10}
+      G: {front_load: 0.03, back_load: 0.20, t_switch: 10}
+      H: {front_load: 0.03, back_load: 0.10, t_switch: 10}
+      I: {front_load: 0.20, back_load: 0.10, t_switch: 10}
+      J: {front_load: 0.10, back_load: 0.20, t_switch: 10}   # ← new regime
+    shock_magnitude: {low: 0.10, medium: 0.30, high: 0.50}
+    latency_level:   {off: 0.00, low: 0.02, medium: 0.08, high: 0.20}
+    mobility:        {low: 0.00, medium: 0.10, high: 0.30}
+    spillover:       {low: 0.00, medium: 0.20, high: 0.40}
+    threshold_map:
+      none:        {shape: "none"}
+      smooth:      {shape: "smooth", steepness: 1.0}
+      cliff_early: {shape: "cliff",  t_star:  5}
+      cliff_mid:   {shape: "cliff",  t_star: 15}
+      cliff_late:  {shape: "cliff",  t_star: 30}
+    shock_timing: {none: null, early: 5, mid: 15, late: 30}
+
+  matrix:                                   # <— now aligned with defaults:
+    r_and_d_regime:    [A, B, C, D, E, F, G, H, I, J]
+    threshold_type:    [none, smooth, cliff_early, cliff_mid, cliff_late]
+    shock_timing:      [none, early, mid, late]
+    shock_magnitude:   [low, medium, high]
+    latency_level:     [off, low, medium, high]
+    mobility:          [low, medium, high]
+    spillover:         [low, medium, high]
+    shared_pool:       ["yes", "no"]
+    evaluator_gap:     [none, low, medium, high]
+    education_pipeline: [off, short_lag, medium_lag, long_lag]
+
 scenarios:
   # exemplar quartet 
   - id: top-smooth-boom-prod-early      # ← scenario ID (free text)

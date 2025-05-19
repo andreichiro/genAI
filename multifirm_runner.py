@@ -2,7 +2,6 @@
 # Mean-field congestion layer for the ECB refactor
 #
 # Key responsibilities
-# --------------------
 # 1.  Advance every firm one period, *then* compute the cross-firm mean
 #     Ū_{-i,t}.  That value feeds back into `screening_capacity()` the
 #     *next* period, closing the congestion loop without introducing
@@ -63,7 +62,7 @@ def _stable_uint32(token: str | int | None, *, global_seed: int | None) -> int: 
     digest   = hashlib.md5(base_str.encode("utf-8")).hexdigest()      # 128-bit hex
     return int(digest[:8], 16)                                        # first 32 bits
 
-# 1 ▸ *Per-firm* mutable container updated each period
+# 1 *Per-firm* mutable container updated each period
 @dataclass(slots=True)
 class FirmECBState:
     """Minimal state needed for the congestion externality."""
@@ -71,7 +70,7 @@ class FirmECBState:
     Uf:       float
     Unf:      float
     Hnf:      float
-    K_AI:   float                     # Poisson intensity scale ▲
+    K_AI:   float                     # Poisson intensity scale 
     mu_prior: float = 0.0 
     queue:    deque        = field(default_factory=new_queue)
     alpha:    float = 0.33 
@@ -123,7 +122,6 @@ def run_mean_field_sim(
     num_periods: int,
     mobility_elasticity: float = 0.0,
     shared_pool: bool = False,
-    tau_spillover: float = 0.0,
     out_csv: Path | None = None,
 ) -> pd.DataFrame:
     """
@@ -161,7 +159,6 @@ def run_mean_field_sim(
         trainee_pipe = deque()                  # harmless placeholder
 
     trainee_stock: float = p_ecb.initial_trainees
-    trainee_pipe  = deque([0.0] * edu_lag, maxlen=edu_lag)
     # initialise “external” capital metric used inside screening_capacity
     if shared_pool:
         U_external_series: List[float] = [float(np.sum([f.U_tot for f in firm_states]))]  # t = −1
@@ -179,15 +176,23 @@ def run_mean_field_sim(
     
     # main loop 
     for t in range(num_periods):
+        # stop if the industry is empty
+        if not firm_states:
+            logging.warning(
+                "run_mean_field_sim: all firms exited at t=%d – simulation halts.", t
+            )
+            break
+
         U_external_prev = U_external_series[-1]
 
         #  Ω(t) : inter-firm knowledge spill-overs this period
-        tau  = getattr(p_ecb, "tau_spillover", 0.0)          # default 0
-        omega = knowledge_spillover(
-            [f.Unf for f in firm_states],
-            tau_spillover,
-        )
-
+        if firm_states:                                    # ← safe guard
+            omega = knowledge_spillover(
+                [f.Unf for f in firm_states],
+                p_ecb.tau_spillover,
+            )
+        else:
+            omega = 0.0
 
         period_rows: List[Dict[str, float]] = []        # buffer to add market_share
         wages: Dict[int, float] = {}                    # for evaluator mobility
@@ -204,11 +209,14 @@ def run_mean_field_sim(
             if wage_i is not None:
                 wages[state.firm_id] = float(wage_i)
             Y_now = kpi.get("Y_new")
+            profit_now = kpi.get("profit") 
             if Y_now is not None:
                 Y_vals.append(float(Y_now))
 
             # push Return-on-Assets sample to the deque 
-            roa_val = (Y_now or 0.0) / max(state.K_AI, 1e-6)
+            base_val = profit_now if profit_now is not None else (Y_now or 0.0)
+            roa_val  = base_val / max(state.K_AI, 1e-6)  # ← NEW formula
+
             state.roa_hist.append(roa_val)
 
             period_rows.append({"firm_id": state.firm_id, "t": t, **kpi})
@@ -250,19 +258,23 @@ def run_mean_field_sim(
         # -------- market-share post-processing --------------------------
 
         for row in period_rows:
-            Y_i = row.get("Y_new")
-            row["market_share"] = (Y_i / Y_tot) if (Y_i is not None and Y_tot > 0) else np.nan
+            Y_i = row.get("Y_new")            
+            row["market_share"] = (
+                (Y_i / Y_tot) if (Y_tot > 0 and Y_i is not None) else np.nan
+            )
+            row["spillover_gain"] = omega
             rows.append(row)
 
         # compute *current* mean for next period’s call
-
-        if shared_pool:
+        if not firm_states:                     # ← NEW guard
+            U_external_now = 0.0
+        elif shared_pool:
             U_external_now = float(np.sum([f.U_tot for f in firm_states]))
+        elif len(firm_states) == 1:
+            U_external_now = 0.0
         else:
-            if len(firm_states) == 1:
-                U_external_now = 0.0
-            else:
-                U_external_now = float(np.mean([f.U_tot for f in firm_states]))
+            U_external_now = float(np.mean([f.U_tot for f in firm_states]))
+
 
         U_external_series.append(U_external_now)
 
@@ -327,10 +339,11 @@ def _run_single_scenario(scn, *, global_seed: int | None = None) -> pd.DataFrame
         num_periods        = scn.num_periods,
         mobility_elasticity= scn.ecb_params.mobility_elasticity,
         shared_pool        = scn.ecb_params.shared_pool,
-        tau_spillover      = getattr(scn, "spillover_intensity", 0.0),
 
     )
     df["scenario_id"] = scn.id
+    df["test_label"]  = scn.test_label                         
+    df["hypothesis"]  = scn.hypothesis  
     return df
 
 def run_ecb(

@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Any, Final      
+from itertools import product
+from collections import OrderedDict
 
 import numpy as np
 import yaml
@@ -22,6 +24,7 @@ ARCHETYPES: Final = {
 @dataclass(frozen=True, slots=True)
 class ScenarioCfg:
     id: str
+
     # global scalars
     num_periods: int
     alpha: float
@@ -48,17 +51,27 @@ class ScenarioCfg:
     ecb_params:    ECBParams
     triage_params: TriageParams
 
+    test_label: str = ""
+    hypothesis: str = ""
+    tags: tuple[str, ...] = ()
+
 @dataclass(slots=True, frozen=True)
 class ScenarioECB:
     """
     Minimal configuration object consumed by `multifirm_runner.run_ecb`.
     """
     id:            str
+
     num_periods:   int
     firms_init:    List[Dict[str, Any]]        # per-firm starting stocks
     ecb_params:    ECBParams
     triage_params: TriageParams
 
+    test_label:    str = ""
+    hypothesis:    str = ""
+    tags:          tuple[str, ...] = ()
+    spillover_intensity: float = 0.0
+    
 # public API 
 def load_scenarios(yaml_path: str | Path = "scenarios.yaml") -> List[ScenarioCfg]:
     """
@@ -70,7 +83,11 @@ def load_scenarios(yaml_path: str | Path = "scenarios.yaml") -> List[ScenarioCfg
     defaults = data["defaults"]
     return [_build_scenario(row, defaults) for row in data["scenarios"]]
 
-def load_scenarios_ecb(yaml_path: str | Path = "scenarios.yaml") -> List[ScenarioECB]:
+def load_scenarios_ecb(
+    yaml_path: str | Path = "scenarios.yaml",
+    *,
+    grid: bool | None = None,          
+) -> List[ScenarioECB]:
     """
     Parse the ECB-style section of `scenarios.yaml` and return a list of
     ScenarioECB objects. Only scenarios marked with engine: ecb are processed.
@@ -98,10 +115,87 @@ def load_scenarios_ecb(yaml_path: str | Path = "scenarios.yaml") -> List[Scenari
                 firms_init=row["firms_init"],
                 ecb_params=ECBParams(**ecb_cfg),
                 triage_params=TriageParams(**tri_cfg),
+                test_label=row.get("test_label", ""),
+                hypothesis=row.get("hypothesis", ""),
+                spillover_intensity=ecb_cfg.get("tau_spillover", 0.0), 
             )
+
             out.append(scenario)
 
+    for auto in generate_matrix(raw["defaults"]):
+        ecb_cfg = {**ecb_defaults, **auto.get("ecb", {})}
+        tri_cfg = {**triage_defaults, **auto.get("triage", {})}
+        out.append(
+            ScenarioECB(
+                id=auto["id"],
+                test_label=auto["test_label"],
+                hypothesis=auto["hypothesis"],
+                num_periods=auto["num_periods"],
+                firms_init=auto["firms_init"],
+                spillover_intensity=ecb_cfg.get("tau_spillover", 0.0),
+                ecb_params=ECBParams(**_subset_kwargs(ECBParams, ecb_cfg)),
+                triage_params=TriageParams(**_subset_kwargs(TriageParams, tri_cfg)),
+            )
+        )
+
     return out
+
+def generate_matrix(defaults: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Expand the `defaults['matrix']` Cartesian grid into a list of raw-scenario
+    dictionaries that mimic the manual YAML records.  Symbolic axis levels are
+    translated through `defaults['lookup_tables']`.
+    """
+    if "matrix" not in defaults:          # nothing to do
+        return []
+
+    axes = OrderedDict(defaults["matrix"])
+    keys, values = axes.keys(), axes.values()
+
+    lut = defaults["lookup_tables"]
+    scenarios: List[Dict[str, Any]] = []
+
+    for combo in product(*values):
+        spec = dict(zip(keys, combo))
+
+        invest_block   = lut["invest_patterns"][spec["r_and_d_regime"]]
+        shock_drop_pct = lut["shock_magnitude"][spec["shock_magnitude"]]
+        eta_decay      = lut["latency_level"][spec["latency_level"]]
+        mobility_eps   = lut["mobility"][spec["mobility"]]
+        spill_int      = lut["spillover"][spec["spillover"]]
+
+        scn_id = f"auto-{len(scenarios):05d}"
+        scenarios.append(
+            {
+                "id": scn_id,
+                "engine": "ecb",
+                "test_label": f"{spec['r_and_d_regime']}-{spec['threshold_type']}-{spec['shock_timing']}",
+                "hypothesis": (
+                    f"Does pattern {spec['r_and_d_regime']} under "
+                    f"{spec['threshold_type']} diffusion withstand "
+                    f"{spec['shock_timing']} shocks?"
+                ),
+                "num_periods": defaults["num_periods"],
+                "firms_init": [{"id": scn_id, "K_AI": 10.0, "U_f": 1.0,
+                                "U_nf": 0.5, "H_nf": 0.3}],
+                "ecb": {
+                    "eta_decay": eta_decay,
+                    "mobility_elasticity": mobility_eps,
+                    "shared_pool": spec["shared_pool"] == "yes",
+                    "tau_spillover": spill_int,
+                },
+                "params": {
+                    "threshold": lut["threshold_map"][spec["threshold_type"]],
+                    "shock": {
+                        "drop_pct": shock_drop_pct,
+                        "start_year": lut["shock_timing"][spec["shock_timing"]],
+                        "duration": 5,
+                    },
+                    **invest_block,
+                },
+            }
+        )
+    return scenarios
 
 # ── internal helpers (thresholds, capital paths, labour splits, …) ────
 def _zero(_: int) -> float:                     # reusable λ 0
@@ -273,7 +367,11 @@ def _build_scenario(row: Dict[str, Any], defaults: Dict[str, Any]) -> ScenarioCf
         skill_interaction_on=skill_interaction_on,
         ecb_params=ecb_params_obj,
         triage_params=triage_params_obj,
+        test_label=row.get("test_label", ""),
+        hypothesis=row.get("hypothesis", ""),
+        tags=tuple(row.get("tags", ())), 
     )
+
 
 """
 1. What the file does, step-by-step

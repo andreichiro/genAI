@@ -21,7 +21,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from utils.triage_utils import bayes_posterior, triage_score
-from utils.screening_utils import compute_threshold
+from utils.triage_utils import apply_threshold
 from collections import namedtuple
 
 # Convenience alias for the queue’s element type
@@ -29,6 +29,10 @@ IdeaTuple      = Tuple[int, float, float, float]          # (t_arrival, μ̂, σ
 IdeaEvalTuple  = Tuple[int, int, float, float, float]     # (t_arrival, t_eval, μ̂, σ̂², v₀)
 
 LatencyStats = namedtuple("LatencyStats", ["count", "mean", "p95", "max", "std", "decay_loss"])    
+
+def _nanpercentile(arr: list[float], q: float) -> float:
+    """Return NaN when the list is empty, otherwise np.percentile(arr, q)."""
+    return np.nan if not arr else float(np.percentile(arr, q))# ---------------------------------------------------------------------------
 
 def enqueue(
     q: Deque[IdeaTuple],
@@ -117,12 +121,13 @@ def enqueue_new_ideas(
 
     triage_eff = np.nan                                                   
     if triage_params is not None:                                      
-        cutoff = compute_threshold(                                     
-            scores,                                                     
-           rule = triage_params.threshold_rule,                       
-            value= triage_params.threshold_value,                      
-        )                                                                
-        keep = [i for i,s in enumerate(scores) if s >= cutoff]          
+        keep_mask = apply_threshold(                    
+            scores=scores,                               
+            rule=triage_params.threshold_rule,          
+            value=triage_params.threshold_value,          
+        )                                                 
+        keep = [i for i, m in enumerate(keep_mask) if m]  
+
         triage_eff = len(keep) / n                                      
         if not keep:                                               
             return triage_eff                                             
@@ -224,10 +229,10 @@ def service_queue_fifo(
             wait = t_now - t_arr
             decay_loss += v0 * (1.0 - np.exp(-eta_decay * wait))
 
-        # ── additional loss for ideas that are *still waiting* ──
-        for t_arr, *_ , v0 in queue:          # ← FIX: queue-deque, not “q”
+        # additional loss for ideas that are *still waiting* 
+        for t_arr, *_ , v0 in queue:          # queue-deque
             wait = t_now - t_arr               # they’ll wait one more period
-            # incremental loss during *this* tick (Δw = 1)
+            # incremental loss during this tick (Δw = 1)
             decay_loss += v0 * (
                 np.exp(-eta_decay * wait) - np.exp(-eta_decay * (wait + 1))
             )
@@ -235,8 +240,8 @@ def service_queue_fifo(
     stats = LatencyStats(
         count=len(waits),
         mean=np.mean(waits) if waits else np.nan,
-        p95=np.percentile(waits, 95) if waits else np.nan,
-        max=np.max(waits) if waits else np.nan,
+        p95=_nanpercentile(waits, 95),
+        max=np.nan if not waits else np.max(waits),
         std=np.std(waits, ddof=0) if waits else np.nan,
         decay_loss=decay_loss, 
     )

@@ -15,8 +15,9 @@ from data_portal import apply_sga_overlay, get_sga_overlay
 import logging
 
 _EXPECTED_ORDER: Final = [
-    "scenario_id", "t", "firm_id",
-    "Y_new",       # output
+    "scenario_id", "test_label", "hypothesis",
+    "t", "firm_id",
+    "Y_new",      
     "psi_eff", "theta", "queue_len",
 ]
 
@@ -36,6 +37,9 @@ _DERIVED_COLS: Final = [
     "market_share",
     "Y_lost_decay",
     "y_new_tot",
+    "evaluator_gap",
+    "U_nf_mean",
+    "spillover_gain",
     "sgna_cost",
     "capital_intensity",        
     "rd_share",                 
@@ -171,8 +175,6 @@ def _add_queue_kpis(
             )
         )
 
-
-
         # Outer-merge and coalesce with any pre-existing values
         df = df.merge(stats, how="left", on=["scenario_id", "t"])
         for col in ("mean_latency", "p95_latency",  
@@ -237,6 +239,37 @@ def _add_tot_output(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def _add_evaluator_gap(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    evaluator_gap = Unf / Uf (> 1 ⇒ non-fungible evaluators dominate)
+    Falls back to NaN when either column is missing or Uf is 0.
+    """
+    if {"Uf", "Unf"}.issubset(df.columns):
+        df["evaluator_gap"] = (
+            df["Unf"] / df["Uf"].replace(0, np.nan)
+        ).astype("float64")
+    else:
+        df["evaluator_gap"] = np.nan
+    return df
+
+def _add_spillover_and_unf(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    • U_nf_mean     – per-period mean of Unf across firms
+    • spillover_gain – per-period mean Ω(t) supplied by the runner
+    These are scenario-level, so we merge the aggregated series back.
+    """
+    grp = df.groupby(["scenario_id", "t"])
+
+    add = grp["Unf"].mean().rename("U_nf_mean").to_frame()
+    if "spillover_gain" in df.columns:                       # ← safeguard
+        add = add.join(grp["spillover_gain"].mean()
+                       .rename("spillover_gain"))
+    else:
+        add["spillover_gain"] = np.nan
+    add = add.reset_index()
+
+    return df.merge(add, on=["scenario_id", "t"], how="left")
+
 def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     """
     Read the raw Phase-B parquet, validate, enrich, and write the curated file.
@@ -266,6 +299,8 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
             .pipe(_add_effective_skills)    
             .pipe(_add_queue_kpis)
             .pipe(_add_market_and_decay)
+            .pipe(_add_evaluator_gap)  
+            .pipe(_add_spillover_and_unf)
             .pipe(_sgna_merge)    
             .pipe(_add_tot_output)        # always defined by the try/except
     )

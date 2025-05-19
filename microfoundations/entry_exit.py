@@ -24,7 +24,8 @@ __all__ = [
 def check_exit(
     roa_hist: Deque[float],
     streak: int = 3,
-    roa_thresh: float = -0.05,
+    roa_thresh: float = 0.05,
+
 ) -> bool:
     """Return **True** if the firm exits this period.
 

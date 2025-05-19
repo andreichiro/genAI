@@ -67,6 +67,19 @@ class ECBParams:
     retire_rate:    float = 0.0      # attrition among trainees
     enroll_const:   float = 0.0      # constant enrolment
     initial_trainees: float = 0.0    # initial trainee stock
-    
-    # The dataclass purposefully contains **no behaviour**; all formulas
-    # live in domain modules such as `screening_utils.py`.
+
+    # parameter validation automatically runs after init 
+    def __post_init__(self):
+        """Sanity-check numeric ranges so bad YAML stops the run early."""
+        if self.psi_shape not in {"logistic", "inv_u"}:
+            raise ValueError(
+                f"psi_shape must be 'logistic' or 'inv_u', got {self.psi_shape}"
+            )
+        if not (0.0 <= self.tau_spillover <= 1.0):
+            raise ValueError("tau_spillover must lie in [0,1]")
+        if self.eta_decay < 0.0:
+            raise ValueError("eta_decay must be non-negative")
+        if self.mobility_elasticity < 0.0:
+            raise ValueError("mobility_elasticity must be non-negative")
+        if not (0.0 <= self.q_success <= 1.0):
+            raise ValueError("q_success must lie in [0,1]")

@@ -16,9 +16,8 @@ import pandas as pd
 import yaml
 from tqdm import tqdm    # lightweight progress bar
 import sys
-
+import textwrap 
 from validator import SCHEMA
-
 import matplotlib.pyplot as _plt
 import plotly.express      as _px
 
@@ -35,17 +34,22 @@ _DEFAULTS = {
     "fig_html": _ROOT / "figures_html",
 }
 
-try:                                                             # ← [NEW]
+try:                                                            
     _CFG = yaml.safe_load(_CFG_YAML.read_text()) if _CFG_YAML.exists() else {}
     _PATHS = (_CFG or {}).get("paths", {}) if isinstance(_CFG, dict) else {}
-except Exception as _e:                                          # ← [NEW]
+except Exception as _e:                                        
     logging.warning("Could not load %s (%s) – using defaults", _CFG_YAML, _e)
     _PATHS = {}
 
-_DATA      = Path(_PATHS.get("out_cur",  _DEFAULTS["out_cur"])).resolve()   # ← [NEW]
-_DIR_PNG   = Path(_PATHS.get("fig_png",  _DEFAULTS["fig_png"])).resolve()   # ← [NEW]
-_DIR_HTML  = Path(_PATHS.get("fig_html", _DEFAULTS["fig_html"])).resolve()  # ← [NEW]
-_PLOT_SPECS = _ROOT / "plot_specs.yaml"                                      # (unchanged)  # ← [CHG]
+_DATA      = Path(_PATHS.get("out_cur",  _DEFAULTS["out_cur"])).resolve()   
+_DIR_PNG   = Path(_PATHS.get("fig_png",  _DEFAULTS["fig_png"])).resolve()  
+_DIR_HTML  = Path(_PATHS.get("fig_html", _DEFAULTS["fig_html"])).resolve()  
+_PLOT_SPECS = _ROOT / "plot_specs.yaml"                                      
+_META_COLS = ["scenario_id", "test_label", "hypothesis"]
+
+def _wrap_label(text: str, width: int = 25) -> str:             
+    """Return *text* wrapped to the given *width* so legends never overflow."""
+    return "\n".join(textwrap.wrap(str(text), width))
 
 def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
     """
@@ -57,7 +61,11 @@ def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
         cols = ["scenario_id", "firm_id"]
         col_name = df[cols].astype(str).agg(" – ".join, axis=1)
     else:
-        col_name = df["scenario_id"]
+        # Concatenate scenario_id · test_label · hypothesis and wrap nicely
+        col_name = (df[_META_COLS]
+                      .astype(str)
+                      .agg(" | ".join, axis=1)
+                      .map(_wrap_label))
 
     wide = (df.assign(_col=col_name)
               .pivot_table(index="t", columns="_col", values=metric,

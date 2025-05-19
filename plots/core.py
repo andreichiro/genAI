@@ -10,13 +10,18 @@ import pandas as pd
 import plotly.express as px
 
 import numpy as np
+import textwrap
 from utils.screening_shared import congestion_tail, psi_peak_series
 
 # Config
 _PNG_DPI = 300
 _DEFAULT_PALETTE = "Set2"        # colour-blind safe
 _LOG = logging.getLogger(__name__)
+_META_COLS = ["scenario_id", "test_label", "hypothesis"]      
 
+def _wrap_label(txt: str, width: int = 25) -> str:            # <<< NEW >>>
+    """Soft-wrap *txt* so long legends never spill outside the figure."""
+    return "\n".join(textwrap.wrap(str(txt), width))
 
 # Helper: static matplotlib lineplot
 def lineplot(
@@ -40,8 +45,12 @@ def lineplot(
         Destination PNG path (parent dir must exist).
     """
     fig, ax = plt.subplots(figsize=(7, 4))
-    for scenario, sub in df.groupby("scenario_id"):
-        ax.plot(sub["t"], sub[metric], label=scenario)
+    for scenario, sub in df.groupby("scenario_id"):                  
+            # Compose “scenario | label | hypothesis” once per line
+            meta_label = _wrap_label(
+                " | ".join(map(str, sub.iloc[0][_META_COLS]))          
+            )
+            ax.plot(sub["t"], sub[metric], label=meta_label)    
 
     ax.set_title(spec["title"])
     ax.set_xlabel("Year t")
@@ -67,16 +76,25 @@ def interactive_lineplot(
     """
     Render an interactive HTML figure for the given metric.
     """
+
+    df = df.assign(                                                  # <<< NEW >>>
+        _label=lambda d: d[_META_COLS]
+                .astype(str)
+                .agg(" | ".join, axis=1)
+                .map(_wrap_label)
+    )
+
     fig = px.line(
         df,
         x="t",
         y=metric,
-        color="scenario_id",
-        title=spec["title"],
-        labels={"t": "Year t", metric: spec["ylabel"]},
-        log_y=spec.get("log_y", False),
-        color_discrete_sequence=px.colors.qualitative.Set2,
-    )
+        color="_label",                                              # <<< CHG >>>
+         title=spec["title"],
+         labels={"t": "Year t", metric: spec["ylabel"]},
+         log_y=spec.get("log_y", False),
+         color_discrete_sequence=px.colors.qualitative.Set2,
+     )
+
     outfile.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(outfile, include_plotlyjs="cdn")
     _LOG.info("HTML written → %s", outfile.as_posix())
@@ -160,8 +178,14 @@ def barplot(df: pd.DataFrame,
     ax.bar(means.index, means.values)
     ax.set_ylabel(spec["ylabel"])
     ax.set_title(spec["title"])
+
     if spec.get("rotate_xticks", True):
-        ax.set_xticklabels(means.index, rotation=45, ha="right")
+        ax.set_xticklabels(
+            [_wrap_label(idx, 20) for idx in means.index],        
+            rotation=45,
+            ha="right",
+        )
+
     fig.tight_layout()
 
     outfile.parent.mkdir(parents=True, exist_ok=True)

@@ -80,6 +80,21 @@ y_new_tot:
   ylabel: "Y (output)"
   log_y: true      # keep log-scale
 
+evaluator_gap:
+  title: "Evaluator Gap (U_nf / U_f)"
+  ylabel: "Gap ratio"
+  log_y: false
+
+U_nf_mean:
+  title: "Mean Non-Fungible Evaluators"
+  ylabel: "U_nf mean"
+  log_y: false
+
+spillover_gain:
+  title: "Knowledge Spill-over Gain Ω(t)"
+  ylabel: "Ω(t)"
+  log_y: false
+  
 Y_new_nominal:
   title: "Nominal Output (no decay)"
   ylabel: "Y_nominal"

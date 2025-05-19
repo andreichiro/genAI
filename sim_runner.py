@@ -4,16 +4,14 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import List
-
+from typing import List, Set
 try:
     from tqdm import tqdm  
 except ImportError: 
     def tqdm(it, **kwargs):  # type: ignore
         return it
-
 import curation                                
-
+import logging
 import pandas as pd
 from scenarios import load_scenarios_ecb, ScenarioECB
 from multifirm_runner import run_ecb 
@@ -22,6 +20,25 @@ from multifirm_runner import run_ecb
 def _collect(df: pd.DataFrame) -> pd.DataFrame:
     """Pass the raw output through Phase-E lightweight tidier."""
     return curation.tidy_dataframe(df)
+
+
+def _resume_filter(scenarios: List[ScenarioECB],
+                   parquet_path: str | Path | None) -> List[ScenarioECB]:
+    if parquet_path is None or not Path(parquet_path).exists():
+        return scenarios
+
+    try:
+        finished_ids: Set[str] = set(pd.read_parquet(parquet_path)["scenario_id"].unique())
+    except Exception as exc:                           # corrupt / incompatible file?
+        logging.warning("Resume skipped: could not read %s (%s)", parquet_path, exc)
+        return scenarios
+
+    remaining = [scn for scn in scenarios if scn.id not in finished_ids]
+    dropped   = len(scenarios) - len(remaining)
+    if dropped:
+        logging.info("Resume-mode: %d / %d scenarios already done; skipping.",
+                     dropped, len(scenarios))
+    return remaining
 
 # CLI                                                                         #
 def main(argv: List[str] | None = None) -> None:
@@ -32,14 +49,30 @@ def main(argv: List[str] | None = None) -> None:
                    help="Destination Parquet file")
     p.add_argument("--jobs", type=int, default=-1,
                    help="Parallel workers (-1 = all cores, 1 = sequential)")
+    p.add_argument("--seed", type=int, default=2025,      # default
+                   help="Global deterministic RNG seed (set another int to vary)")
 
     args = p.parse_args(argv)
 
-    scenarios: List[ScenarioECB] = load_scenarios_ecb(args.config)
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    final_df = run_ecb(scenarios, jobs=args.jobs)
-    final_df = _collect(final_df)
+    scenarios: List[ScenarioECB] = load_scenarios_ecb(
+        args.config,
+        grid=True                      # grid expansion is now mandatory
+    )
+    scenarios.sort(key=lambda scn: scn.id)           # deterministic job order
 
+    resume_file = Path(args.out)
+    scenarios   = _resume_filter(scenarios, resume_file)
+
+    if not scenarios:
+        print("[sim_runner] 🎉 nothing to run; all scenarios complete.")
+        return
+
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    final_df = run_ecb(scenarios,
+                      jobs=args.jobs,
+                      seed_global=args.seed)        
+
+    final_df = _collect(final_df)
     final_df.to_parquet(args.out, index=False)
 
     # write a small head-preview for quick git-diffs
@@ -47,8 +80,8 @@ def main(argv: List[str] | None = None) -> None:
     final_df.to_csv(preview, index=False)
 
     print(f"[sim_runner] ✅ wrote {len(final_df):,} rows -> {args.out}")
+    print(f"[sim_runner] 🔒 deterministic seed = {args.seed}")           # <<< ALWAYS shown
     print(f"[sim_runner] 📄 preview  -> {preview}")
-
 
 if __name__ == "__main__":                # entry-point
     try:

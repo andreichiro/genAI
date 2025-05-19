@@ -67,7 +67,7 @@ def bayes_posterior(
     var_post  = (tau2 * sigma2) / denom
     return float(mu_post), float(var_post)
 
-def apply_threshold(                               # ← [NEW] new helper
+def apply_threshold(                               
     scores: np.ndarray,
     *,
     rule: str,
@@ -91,6 +91,10 @@ def apply_threshold(                               # ← [NEW] new helper
     np.ndarray[bool]
         Boolean mask of accepted ideas, same shape as *scores*.
     """
+    if not isinstance(scores, np.ndarray):
+        scores = np.asarray(scores, dtype=float)
+
+
     if scores.ndim != 1:
         raise ValueError("scores must be a 1-D array")
 

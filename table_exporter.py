@@ -7,6 +7,7 @@ helper to produce summary tables from `simulations_curated.parquet`.
 from __future__ import annotations
 import pandas as pd
 from pathlib import Path
+import tabulate                          # lightweight dep
 
 _CUR   = Path(__file__).parent
 _DATA  = _CUR / "outputs" / "simulations_curated.parquet"
@@ -14,30 +15,50 @@ _TDIR  = _CUR / "tables"
 _TCSV  = _TDIR / "summary_metrics.csv"
 _TTEX  = _TDIR / "summary_metrics.tex"
 
-_METRICS = [
-    "Y_new",
-    "y_growth_pct",
-    "capital_intensity",
-    "rd_share",
-    "creativity_loss",   
-    "triage_eff",       
-    "market_share",
-    "Y_lost_decay",
-]
+# Meta & metric taxonomy --------------------------------------------------------
+_META = ["scenario_id", "test_label", "hypothesis"]
+_BASE     = ["Y_new", "y_growth_pct", "capital_intensity", "rd_share"]
+_LATENCY  = ["mean_latency", "p95_latency", "max_latency", "std_latency"]
+_MARKET   = ["market_share", "congestion_idx_mean"]
+_DECAY    = ["creativity_loss", "Y_lost_decay"]
 
-def _build_summary(df: pd.DataFrame) -> pd.DataFrame:
-    """Scenario-level mean of the key Phase-C derived metrics."""
-    return (df.groupby("scenario_id")[_METRICS]
-              .mean()
+# master list, preserving section order; duplicates automatically removed
+_ALL_METRICS: list[str] = []
+for _block in (_BASE, _LATENCY, _MARKET, _DECAY):
+   _ALL_METRICS.extend([m for m in _block if m not in _ALL_METRICS])
+
+def _build_summary(df: pd.DataFrame) -> pd.DataFrame:            # ← sig unchanged
+    """
+    Scenario-level (actually meta-level) mean of **every** numeric KPI.
+
+    *Primary list* (_ALL_METRICS) is shown first; any additional numeric
+    columns that slipped through curation are appended automatically so
+    the table never “loses” information when KPIs evolve.
+    """
+    gb = df.groupby(_META, dropna=False)
+
+    # 1️⃣ mean aggregation for declared metrics ---------------------- ### NEW ###
+    summary = gb[_ALL_METRICS].mean()
+
+    # 2️⃣ pick up any extra numeric columns not yet covered ---------- ### NEW ###
+    extra_cols = (
+        df.select_dtypes(include="number")
+          .columns.difference(summary.columns, sort=False)
+    )
+    if len(extra_cols):
+        summary = summary.join(gb[extra_cols].mean())
+
+    return (summary
               .reset_index()
-              .sort_values("scenario_id"))
+              .sort_values(_META))
+
 
 def export() -> None:
     _TDIR.mkdir(exist_ok=True)
-    df = pd.read_parquet(_DATA, columns=["scenario_id", *_METRICS])
+    # load *all* columns; _build_summary will filter/aggregate as needed
+    df = pd.read_parquet(_DATA)
     summary = _build_summary(df)
-
-    summary.to_csv(_TCSV, index=False)
+    summary.to_csv(_TCSV, index=False) 
     # quick LaTeX (booktabs) for journals – user may ignore if not needed
     try:
         import tabulate                          # lightweight dep

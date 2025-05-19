@@ -19,21 +19,20 @@ from dataclasses import dataclass
 
 @dataclass(slots=True, frozen=True)
 class TriageParams:
-    # ------------------------------------------------------------- noise & priors
+    # noise & priors
     sigma_noise:   float = 1.0       # σ  > 0
     tau_prior:      float = 1.0       # τ₀ > 0
 
-    # ------------------------------------------------------------- exploration
+    # exploration
     lambda_explore: float = 0.0       # λ  (can be <0 for conservative)
 
-    # ------------------------------------------------------------- thresholding
+    # thresholding
     threshold_rule:  str   = "percentile"   # "percentile" | "absolute"
     threshold_value: float = 50.0           # pct in [0,100]  or absolute cut-off
 
-    # -------------------------------------------------------------------------
     def __post_init__(self) -> None:        # lightweight validation
-        if self.sigma_signal <= 0:
-            raise ValueError("sigma_signal must be > 0")
+        if self.sigma_noise <= 0:                       
+            raise ValueError("sigma_noise must be > 0")   
         if self.tau_prior <= 0:
             raise ValueError("tau_prior must be > 0")
         if self.threshold_rule not in {"percentile", "absolute"}:

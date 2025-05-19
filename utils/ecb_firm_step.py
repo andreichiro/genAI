@@ -11,6 +11,7 @@ from typing import Dict, Any
 # helper layers (implemented in the next files we add/patch)
 from .ecb_params      import ECBParams
 from .screening_utils  import psi_efficiency, theta_accuracy
+from .triage_params    import TriageParams
 
 try:                                    # preferred: package-relative
     from .queue_dynamics import enqueue_new_ideas, service_queue_fifo
@@ -27,7 +28,7 @@ def ecb_firm_step(
     state: "FirmECBState",
     params: ECBParams,
     U_bar_others: float,
-    triage_params,  # Add this parameter with a default value
+    triage_params: TriageParams,                           
     rng: np.random.Generator,
     mu_spill: float = 0.0,    
 ) -> Dict[str, Any]:
@@ -90,17 +91,24 @@ def ecb_firm_step(
     Y = unit_price * quantity                                # revenue = P·Q
     Y_nominal = Y + decay_loss  
 
-    # 5) Capital & skill updates --------------------------------------------
+    # 5) operating cost & profit
+    sgna_rate = getattr(params, "sgna_cost_rate", 0.0)       # ≤ 1   (default 0)
+    sgna_cost = sgna_rate * Y
+    profit    = Y - sgna_cost
+
+    # 6) Capital & skill updates --------------------------------------------
     state.Uf   *= (1.0 - params.delta_Uf)
     state.Unf  *= (1.0 - params.delta_Unf)
     state.Hnf   = (1.0 - params.delta_H) * state.Hnf  + params.mu_learning * psi_eff
 
-    # 6) Return KPIs 
+    # 7) Return KPIs 
     return {
         "t":             t,
         "firm_id":       state.firm_id,
         "Y_new":         Y,
         "Y_new_nominal":  Y_nominal,    
+        "sgna_cost":      sgna_cost,              
+        "profit":         profit,               
         "congestion_idx": U_bar_others, 
         "psi_eff":       psi_eff,
         "theta":         theta,
@@ -111,6 +119,11 @@ def ecb_firm_step(
         "std_latency":   latency_stats.std  if latency_stats.count else np.nan,  
         "creativity_loss": decay_loss, 
         "triage_eff":    triage_eff,    
-        "omega_spill":   mu_spill,                                          
+        "omega_spill":   mu_spill,              
+        "Uf": state.Uf, 
+        "Unf": state.Unf,
+        "Hnf": state.Hnf                      
     }
+
+
 

@@ -9,11 +9,16 @@ SCHEMA = pa.DataFrameSchema(
     {
         # core identifiers 
         "scenario_id": Column(str, nullable=False),
+        "test_label":  Column(str, nullable=False),         
+        "hypothesis":  Column(str, nullable=False),         
+
         "firm_id":     Column(int, Check.ge(0)),
         "t":           Column(int, Check.ge(0)),
 
         # ECB micro KPIs
         "Y_new":       Column(float, Check.ge(0)),
+        "Y_new_nominal": Column(float, Check.ge(0)),      # <<< NEW >>>
+
         "psi_eff":     Column(float, Check.ge(0)),
         "theta":       Column(float, Check.ge(0)),
         "congestion_idx":   Column(float, Check.ge(0), nullable=True),
@@ -22,14 +27,32 @@ SCHEMA = pa.DataFrameSchema(
         #  optional / derived 
         "mean_latency": Column(float, Check.ge(0), nullable=True),
         "p95_latency":  Column(float, Check.ge(0), nullable=True),
+        "decay_loss":     Column(float, Check.ge(0), nullable=True, required=False),  # alias
         "max_latency":     Column(float, Check.ge(0), nullable=True),  # tail-risk queue wait
         "std_latency":     Column(float, Check.ge(0), nullable=True),  # dispersion of waits
         "creativity_loss": Column(float, nullable=True, required=False),  # ΔY from idea decay
         "triage_eff":      Column(float, [Check.ge(0), Check.le(1)], nullable=True),  # accepted/total
+        
+        "evaluator_gap":   Column(float, Check.ge(0), nullable=True, required=False),  
+        "U_nf_mean":       Column(float, Check.ge(0), nullable=True, required=False),  
+        "spillover_gain":  Column(float, nullable=True, required=False),               
+        "Y_lost_decay":    Column(float, Check.ge(0), nullable=True, required=False),  
+
         "market_share": Column(float, Check.in_range(0, 1), nullable=True),
+        "congestion_idx_mean": Column(float, Check.ge(0), nullable=True, required=False), 
+
         "sgna_cost": Column(float, Check.ge(0), nullable=True, required=False),
+        "profit":    Column(float, nullable=True, required=False),  
         "creativity_loss_pct_mean": Column(float, nullable=True, required=False),   # %
         "H_nf_mean":                Column(float, nullable=True, required=False),   # evaluator stock
+   
+        # evaluator stocks 
+        "Uf":  Column(float, Check.ge(0), nullable=True, required=False),
+        "Unf": Column(float, Check.ge(0), nullable=True, required=False),
+        "Hnf": Column(float, Check.ge(0), nullable=True, required=False),
+
+  
+
     },
     coerce=True,
     strict=False,              # allow future experimental columns
