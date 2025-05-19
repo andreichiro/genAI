@@ -123,6 +123,7 @@ def run_mean_field_sim(
     num_periods: int,
     mobility_elasticity: float = 0.0,
     shared_pool: bool = False,
+    tau_spillover: float = 0.0,
     out_csv: Path | None = None,
 ) -> pd.DataFrame:
     """
@@ -165,7 +166,14 @@ def run_mean_field_sim(
     if shared_pool:
         U_external_series: List[float] = [float(np.sum([f.U_tot for f in firm_states]))]  # t = −1
     else:
-        U_external_series: List[float] = [float(np.mean([f.U_tot for f in firm_states]))]  # t = −1
+        n_firms = len(firm_states)
+        if n_firms == 1:                                    # self-congestion edge-case
+            U_external_series: List[float] = [0.0]          #   → no external pool
+        else:                                               # ≥ 2 firms ⇒ mean of others
+            U_external_series: List[float] = [
+                float(np.mean([f.U_tot for f in firm_states]))
+            ]
+
 
     prev_Y_tot: float = np.nan 
     
@@ -175,7 +183,10 @@ def run_mean_field_sim(
 
         #  Ω(t) : inter-firm knowledge spill-overs this period
         tau  = getattr(p_ecb, "tau_spillover", 0.0)          # default 0
-        omega = knowledge_spillover([f.Unf for f in firm_states], tau)
+        omega = knowledge_spillover(
+            [f.Unf for f in firm_states],
+            tau_spillover,
+        )
 
 
         period_rows: List[Dict[str, float]] = []        # buffer to add market_share
@@ -248,7 +259,11 @@ def run_mean_field_sim(
         if shared_pool:
             U_external_now = float(np.sum([f.U_tot for f in firm_states]))
         else:
-            U_external_now = float(np.mean([f.U_tot for f in firm_states]))
+            if len(firm_states) == 1:
+                U_external_now = 0.0
+            else:
+                U_external_now = float(np.mean([f.U_tot for f in firm_states]))
+
         U_external_series.append(U_external_now)
 
         # update trainee pipeline  ➜ inject graduates equally
@@ -312,6 +327,8 @@ def _run_single_scenario(scn, *, global_seed: int | None = None) -> pd.DataFrame
         num_periods        = scn.num_periods,
         mobility_elasticity= scn.ecb_params.mobility_elasticity,
         shared_pool        = scn.ecb_params.shared_pool,
+        tau_spillover      = getattr(scn, "spillover_intensity", 0.0),
+
     )
     df["scenario_id"] = scn.id
     return df

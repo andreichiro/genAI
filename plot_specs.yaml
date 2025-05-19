@@ -31,8 +31,18 @@ p95_latency:
   log_y: false
 
 creativity_loss:
-  title: "Creativity Loss (%)"
+  title: "Lost Creative Output (absolute)"
   ylabel: "Lost creative value"
+  log_y: false
+
+creativity_loss_pct:
+  title: "Creativity Loss (%)"
+  ylabel: "Lost creative value (%)"
+  log_y: false
+
+creativity_loss_pct_mean:
+  title: "Creativity Loss (% of nominal)"
+  ylabel: "% of Y_nominal"
   log_y: false
 
 triage_eff:
@@ -40,9 +50,9 @@ triage_eff:
   ylabel: "Efficiency score"
   log_y: false
 
-congestion_idx_mean:         
-  title: "Congestion Index η·Ū̄ (scenario mean)"
-  ylabel: "Congestion index"
+congestion_idx_mean:
+  title: "External Evaluators (Ū̄)" 
+  ylabel: "Evaluators per firm"
   log_y: false
 
 market_share:
@@ -58,6 +68,11 @@ max_latency:
 std_latency:
   title: "Latency Std-Dev"
   ylabel: "Std latency (periods)"
+  log_y: false
+
+H_nf_mean:
+  title: "Evaluator Stock (H_nf)"
+  ylabel: "Non-fungible evaluators"
   log_y: false
 
 y_new_tot:

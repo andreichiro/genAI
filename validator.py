@@ -7,19 +7,19 @@ from pandera.pandas import Column, Check
 
 SCHEMA = pa.DataFrameSchema(
     {
-        # ── core identifiers ──────────────────────────────────────────────
+        # core identifiers 
         "scenario_id": Column(str, nullable=False),
         "firm_id":     Column(int, Check.ge(0)),
         "t":           Column(int, Check.ge(0)),
 
-        # ── ECB micro KPIs ────────────────────────────────────────────────
+        # ECB micro KPIs
         "Y_new":       Column(float, Check.ge(0)),
         "psi_eff":     Column(float, Check.ge(0)),
         "theta":       Column(float, Check.ge(0)),
         "congestion_idx":   Column(float, Check.ge(0), nullable=True),
         "queue_len":   Column(int,   Check.ge(0)),
 
-        # ── optional / derived ────────────────────────────────────────────
+        #  optional / derived 
         "mean_latency": Column(float, Check.ge(0), nullable=True),
         "p95_latency":  Column(float, Check.ge(0), nullable=True),
         "max_latency":     Column(float, Check.ge(0), nullable=True),  # tail-risk queue wait
@@ -28,7 +28,8 @@ SCHEMA = pa.DataFrameSchema(
         "triage_eff":      Column(float, [Check.ge(0), Check.le(1)], nullable=True),  # accepted/total
         "market_share": Column(float, Check.in_range(0, 1), nullable=True),
         "sgna_cost": Column(float, Check.ge(0), nullable=True, required=False),
-
+        "creativity_loss_pct_mean": Column(float, nullable=True, required=False),   # %
+        "H_nf_mean":                Column(float, nullable=True, required=False),   # evaluator stock
     },
     coerce=True,
     strict=False,              # allow future experimental columns

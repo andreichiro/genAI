@@ -64,6 +64,20 @@ def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
                            aggfunc="mean")     # duplicates averaged
               .sort_index()
               .dropna(how="all", axis=1))    
+    
+    if wide.dropna(axis=1, how="all").empty:
+        wide = (df.assign(_col=col_name)
+                  .pivot_table(index="t", columns="_col", values=metric,
+                               aggfunc="first")          # no aggregation
+                  .sort_index())
+
+    if wide.isna().all().all():                              
+        wide = (                                             
+            df.pivot(index="t",                              
+                     columns=["scenario_id", "firm_id"],      
+                     values=metric)                          
+              .sort_index())                                 
+
     return wide
 
 def _load_specs() -> dict:
@@ -100,9 +114,40 @@ def _interactive_lineplot(df: pd.DataFrame, metric: str, spec: dict, out_html: P
     )
     fig.write_html(out_html, include_plotlyjs="cdn")
 
-
 def _draw(metric: str, spec: dict, wide: pd.DataFrame,
           out_png: Path, out_html: Path) -> None:
+
+    # *market-share* needs firm-level traces in the legend
+
+    if metric == "market_share":                                  
+        long = (wide.reset_index()                               
+                     .melt(id_vars="t",                            
+                           var_name="scenario_firm",              
+                           value_name="market_share"))            
+
+        #  Matplotlib (static PNG) 
+        _plt.figure(figsize=(6, 3))                                
+        for name, grp in long.groupby("scenario_firm"):         
+            _plt.plot(grp["t"], grp["market_share"],               
+                     label=name, lw=1.5, marker="o")               
+        _plt.title(spec.get("title", metric))                     
+        _plt.xlabel("Year t")                                     
+        _plt.ylabel(spec.get("ylabel", metric))                   
+        _plt.legend(fontsize="x-small", ncol=3)                    
+        _plt.tight_layout()                                      
+        _plt.savefig(out_png, dpi=300)                            
+        _plt.close()                                             
+
+        #  Plotly (interactive HTML) 
+        fig = _px.line(long, x="t", y="market_share",              
+                       color="scenario_firm",                   
+                       title=spec.get("title", metric),         
+                       labels={                                   
+                           "t": "Year t",                          
+                           "market_share": spec.get("ylabel", metric) 
+                       })                                        
+        fig.write_html(out_html, include_plotlyjs="cdn")         
+        return                                                     
 
     # -------- Matplotlib
     _palette = _plt.cm.get_cmap("tab20").colors
@@ -132,9 +177,14 @@ def render_all() -> None:
     df = pd.read_parquet(_DATA)
     SCHEMA.validate(df, lazy=True)          # D-1 safety net
 
+    if "engine" in df.columns:
+        df = df[df["engine"].isin(["phase_b", "ecb"])]
+    # --------------------------------------------------------------- ### NEW ###
+
     # remove heavy columns not needed for plotting (vector x_values)
     if "x_values" in df.columns:
         df = df.drop(columns="x_values")
+
 
     specs = _load_specs()
     _DIR_PNG.mkdir(exist_ok=True, parents=True)

@@ -27,6 +27,8 @@ _DERIVED_COLS: Final = [
     "max_latency",  
     "std_latency", 
     "creativity_loss",
+    "creativity_loss_pct",
+    "creativity_loss_pct_mean",   
     "triage_eff",
     "ROI_skill",
     "congestion_idx",
@@ -202,6 +204,10 @@ def _add_market_and_decay(df: pd.DataFrame) -> pd.DataFrame:
         .clip(lower=0)
         .astype("float64")
     )
+    df["creativity_loss_pct"] = (
+    df["creativity_loss"] / df["Y_new_nominal"].replace(0, np.nan)
+    ) * 100.0                                        
+
     return df
 
 def _add_tot_output(df: pd.DataFrame) -> pd.DataFrame:
@@ -218,7 +224,16 @@ def _add_tot_output(df: pd.DataFrame) -> pd.DataFrame:
           .rename("congestion_idx_mean")
           .reset_index()
     )
-    df = df.merge(cong, on=["scenario_id", "t"], how="left")
+    loss_pct_mean = (
+        df.groupby(["scenario_id", "t"])["creativity_loss_pct"]
+          .mean()
+          .rename("creativity_loss_pct_mean")
+          .reset_index()
+    )                                        
+
+    df = (df
+            .merge(cong,          on=["scenario_id", "t"], how="left")
+            .merge(loss_pct_mean, on=["scenario_id", "t"], how="left")) 
 
     return df
 

@@ -38,6 +38,8 @@ defaults:
     v0_sigma:           0.20
     mobility_elasticity: 0.0
     shared_pool:        false
+    tau_spillover:      0.0
+
   triage_params:               
     sigma_noise:     1.0 
     tau_prior:       1.0
@@ -130,8 +132,46 @@ scenarios:
     ecb:                      # ECB overrides go here
       mobility_elasticity: 0.40
       shared_pool:        false
+      tau_spillover:      0.40
 
     params:
+      steady:            {invest_rate: 0.08}
+      labor:             {rd_share_high: 0.15, rd_share_low: 0.05}
+
+  - id: ecb-spillover-coop                 # cooperative knowledge spill-overs
+    archetype: top                         # keep same grouping for plots
+    engine:    ecb
+    threshold: smooth
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: knowledge_scaled
+
+    # two proprietary evaluator pools, no labour mobility, pure spill-overs
+    spillover_intensity: 0.40             # τ  (exposed by Phase A-7)
+    firms_init:
+      - {id: A, K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+      - {id: B, K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+
+  - id: eval-gap-inequality              # asymmetric evaluator endowments
+    archetype: top
+    engine:    ecb
+    threshold: smooth
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: knowledge_scaled
+
+    firms_init:                          # A starts richer in non-fungible evals
+      - {id: Firm-A, K_AI: 10.0, U_f: 1.0, U_nf: 15.0, H_nf: 0.3}
+      - {id: Firm-B, K_AI: 10.0, U_f: 1.0, U_nf:  5.0, H_nf: 0.3}
+
+    ecb:
+      mobility_elasticity: 0.40          # keep moat-duopoly settings
+      shared_pool:        false
+      tau_spillover:      0.40
+
+    params:                              # from moat-duopoly
       steady:            {invest_rate: 0.08}
       labor:             {rd_share_high: 0.15, rd_share_low: 0.05}
 
@@ -151,16 +191,22 @@ scenarios:
       shared_pool:        true
       mobility_elasticity: 0.0
     params:
-      steady:            {invest_rate: 0.06}
-      labor:             {rd_share_high: 0.30, rd_share_low: 0.10}
+      steady:            {invest_rate: 0.08}
+      labor:             {rd_share_high: 0.15, rd_share_low: 0.05}
+
 
   - id: education-pipeline-demo             # education lag
     archetype: bottom
+    engine:    ecb
+
     threshold: cliff
     investment_path: steady
     labor_split: production_heavy
     shock_timing: none
     x_updater: frozen
+    firms_init:                                  
+      - {id: EduCo, K_AI: 8.0, U_f: 0.8, U_nf: 0.4, H_nf: 0.2}    
+
     params:
       threshold:         {t_star: 18, height: 0.4}
       steady:            {invest_rate: 0.05}
