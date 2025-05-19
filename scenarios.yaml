@@ -33,17 +33,17 @@ defaults:
     eta_congestion:     0.05
     lambda_poisson:     0.10
     eta_clip:           1.0
-    eta_decay:          0.0
+    eta_decay:          0.20
     v0_mu:              1.0
     v0_sigma:           0.20
-    mobility_elasticity: 0.0
+    mobility_elasticity: 0.1
     shared_pool:        false
-    tau_spillover:      0.0
+    tau_spillover:      0.1
 
   triage_params:               
     sigma_noise:     1.0 
     tau_prior:       1.0
-    lambda_explore:  0.0
+    lambda_explore:  0.1
     threshold_rule:  percentile
     threshold_value: 50.0
 
@@ -189,7 +189,7 @@ scenarios:
       - {id: Gamma,  K_AI:  8.0, U_f: 0.8, U_nf: 0.4, H_nf: 0.2}
     ecb:
       shared_pool:        true
-      mobility_elasticity: 0.0
+      mobility_elasticity: 0.1
     params:
       steady:            {invest_rate: 0.08}
       labor:             {rd_share_high: 0.15, rd_share_low: 0.05}

@@ -46,9 +46,7 @@ except Exception as _e:                                   # pragma: no cover
 
 _EXT_DIR = Path(_PATHS.get("extern_data", _DEFAULT_DIR)).resolve()
 
-# ---------------------------------------------------------------------------
 # SG&A overlay loader  (Phase 8 deliverable)
-# ---------------------------------------------------------------------------
 _SGA_SCHEMA = pa.DataFrameSchema(
     {
         "scenario_id": Column(str, nullable=False),

@@ -220,10 +220,18 @@ def service_queue_fifo(
     waits = [t_now - t_arr for t_arr, *_ in served] if t_now is not None else []
     decay_loss = 0.0
     if eta_decay > 0.0 and t_now is not None:
-       for t_arr, *_ , v0 in served:
-           wait = t_now - t_arr
-           decay_loss += v0 * (1.0 - np.exp(-eta_decay * wait))
+        for t_arr, *_ , v0 in served:
+            wait = t_now - t_arr
+            decay_loss += v0 * (1.0 - np.exp(-eta_decay * wait))
 
+        # ── additional loss for ideas that are *still waiting* ──
+        for t_arr, *_ , v0 in queue:          # ← FIX: queue-deque, not “q”
+            wait = t_now - t_arr               # they’ll wait one more period
+            # incremental loss during *this* tick (Δw = 1)
+            decay_loss += v0 * (
+                np.exp(-eta_decay * wait) - np.exp(-eta_decay * (wait + 1))
+            )
+            
     stats = LatencyStats(
         count=len(waits),
         mean=np.mean(waits) if waits else np.nan,
