@@ -119,7 +119,8 @@ def ecb_firm_step(
         "std_latency":   latency_stats.std  if latency_stats.count else np.nan,  
         "creativity_loss": decay_loss, 
         "triage_eff":    triage_eff,    
-        "omega_spill":   mu_spill,              
+        "omega_spill":   mu_spill,       
+        "spillover_gain": mu_spill,       
         "Uf": state.Uf, 
         "Unf": state.Unf,
         "Hnf": state.Hnf                      

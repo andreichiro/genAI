@@ -36,7 +36,8 @@ _DEFAULTS = {
 
 try:                                                            
     _CFG = yaml.safe_load(_CFG_YAML.read_text()) if _CFG_YAML.exists() else {}
-    _PATHS = (_CFG or {}).get("paths", {}) if isinstance(_CFG, dict) else {}
+    _PATHS = (_CFG.get("defaults", {}).get("paths", {})  
+              if isinstance(_CFG, dict) else {})
 except Exception as _e:                                        
     logging.warning("Could not load %s (%s) – using defaults", _CFG_YAML, _e)
     _PATHS = {}
@@ -66,6 +67,7 @@ def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
                       .astype(str)
                       .agg(" | ".join, axis=1)
                       .map(_wrap_label))
+
 
     wide = (df.assign(_col=col_name)
               .pivot_table(index="t", columns="_col", values=metric,
@@ -185,8 +187,6 @@ def render_all() -> None:
     df = pd.read_parquet(_DATA)
     SCHEMA.validate(df, lazy=True)          # D-1 safety net
 
-    if "engine" in df.columns:
-        df = df[df["engine"].isin(["phase_b", "ecb"])]
     # --------------------------------------------------------------- ### NEW ###
 
     # remove heavy columns not needed for plotting (vector x_values)

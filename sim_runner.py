@@ -76,12 +76,12 @@ def main(argv: List[str] | None = None) -> None:
     final_df.to_parquet(args.out, index=False)
 
     # write a small head-preview for quick git-diffs
-    preview = Path(args.out).with_suffix(".preview.csv")
-    final_df.to_csv(preview, index=False)
+    # preview = Path(args.out).with_suffix(".preview.csv")
+    # final_df.to_csv(preview, index=False)
 
     print(f"[sim_runner] ✅ wrote {len(final_df):,} rows -> {args.out}")
     print(f"[sim_runner] 🔒 deterministic seed = {args.seed}")           # <<< ALWAYS shown
-    print(f"[sim_runner] 📄 preview  -> {preview}")
+    # print(f"[sim_runner] 📄 preview  -> {preview}")
 
 if __name__ == "__main__":                # entry-point
     try:

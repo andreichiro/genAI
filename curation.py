@@ -39,6 +39,7 @@ _DERIVED_COLS: Final = [
     "y_new_tot",
     "evaluator_gap",
     "U_nf_mean",
+    "H_nf_mean",  
     "spillover_gain",
     "sgna_cost",
     "capital_intensity",        
@@ -100,8 +101,7 @@ def _add_intensity(df: pd.DataFrame) -> pd.DataFrame:
             df[la_col] / (df[la_col] + df[ly_col]).replace(0, np.nan)
         ).astype("float64")
     else:
-        df["rd_share"] = np.nan
-
+        df["rd_share"] = 0.0        
     return df
 
 def _add_effective_skills(df: pd.DataFrame) -> pd.DataFrame:
@@ -258,17 +258,19 @@ def _add_spillover_and_unf(df: pd.DataFrame) -> pd.DataFrame:
     • spillover_gain – per-period mean Ω(t) supplied by the runner
     These are scenario-level, so we merge the aggregated series back.
     """
-    grp = df.groupby(["scenario_id", "t"])
+    if "spillover_gain" not in df.columns and "omega_spill" in df.columns:
+        df["spillover_gain"] = df["omega_spill"]
 
-    add = grp["Unf"].mean().rename("U_nf_mean").to_frame()
-    if "spillover_gain" in df.columns:                       # ← safeguard
-        add = add.join(grp["spillover_gain"].mean()
-                       .rename("spillover_gain"))
+    grp  = df.groupby(["scenario_id", "t"])
+    add  = grp["Unf"].mean().rename("U_nf_mean").to_frame()
+
+    if "Hnf" in df.columns:
+        add["H_nf_mean"] = grp["Hnf"].mean()
     else:
-        add["spillover_gain"] = np.nan
-    add = add.reset_index()
+       add["H_nf_mean"] = np.nan              # broadcast NaN – keeps schema happy
 
-    return df.merge(add, on=["scenario_id", "t"], how="left")
+    add["spillover_gain"] = grp["spillover_gain"].mean()
+    return df.merge(add.reset_index(), on=["scenario_id", "t"], how="left")
 
 def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     """
@@ -308,6 +310,9 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     for col in ("x_sum", "x_varieties"):                                  
         if col not in df.columns:                                         
             df[col] = np.nan                                               
+
+    if "triage_eff" in df.columns:
+        df["triage_eff"] = df["triage_eff"].fillna(0.0)
 
     # 3) Re-order columns → core · derived · any extras
     base_cols = [c for c in df.columns if c != "x_values"]  # use post-pipeline cols
