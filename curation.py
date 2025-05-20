@@ -13,6 +13,9 @@ from pathlib import Path
 from collections import OrderedDict          # add to imports
 from data_portal import apply_sga_overlay, get_sga_overlay
 import logging
+from tqdm import tqdm  
+import pyarrow.parquet as pq         
+import pyarrow as pa
 
 _EXPECTED_ORDER: Final = [
     "scenario_id", "test_label", "hypothesis",
@@ -273,63 +276,92 @@ def _add_spillover_and_unf(df: pd.DataFrame) -> pd.DataFrame:
     return df.merge(add.reset_index(), on=["scenario_id", "t"], how="left")
 
 def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
-    """
-    Read the raw Phase-B parquet, validate, enrich, and write the curated file.
-    Never mutates the original parquet.
-    """
-    raw = pd.read_parquet(parquet_path)
-
-    # 1) Schema validation (fail-fast, aggregated errors)
-    validator.SCHEMA.validate(raw, lazy=True)
-
-    # 2) Transform pipeline
+    """One-file, two-stream curator – never loads the whole dataset in RAM."""
+    # ─── 0 · SG&A overlay ────────────────────────────────────────────────────
     try:
-        overlay_df = get_sga_overlay()   # will raise FileNotFoundError if absent
+        overlay_df  = get_sga_overlay()
         _sgna_merge = lambda d: apply_sga_overlay(d, overlay_df)
-    except FileNotFoundError as err:
-        logging.warning("SG&A overlay not found (%s) – sgna_cost set to 0.", err)
+    except FileNotFoundError:
+        logging.warning("SG&A overlay missing – sgna_cost forced to 0.")
+        _sgna_merge = lambda d: d.assign(sgna_cost=0.0)
 
-        def _sgna_merge(d: pd.DataFrame) -> pd.DataFrame:   # graceful fallback
-            d["sgna_cost"] = 0.0
-            return d
-
-    df = (
-        raw
-            .pipe(_flatten_x) 
-            .pipe(_add_growth)
-            .pipe(_add_intensity)            
-            .pipe(_add_effective_skills)    
-            .pipe(_add_queue_kpis)
-            .pipe(_add_market_and_decay)
-            .pipe(_add_evaluator_gap)  
-            .pipe(_add_spillover_and_unf)
-            .pipe(_sgna_merge)    
-            .pipe(_add_tot_output)        # always defined by the try/except
-    )
-
-    for col in ("x_sum", "x_varieties"):                                  
-        if col not in df.columns:                                         
-            df[col] = np.nan                                               
-
-    if "triage_eff" in df.columns:
-        df["triage_eff"] = df["triage_eff"].fillna(0.0)
-
-    # 3) Re-order columns → core · derived · any extras
-    base_cols = [c for c in df.columns if c != "x_values"]  # use post-pipeline cols
-    ordered_unique_cols = list(OrderedDict.fromkeys(base_cols + _DERIVED_COLS))
-    df = df[ordered_unique_cols]
-
-    # 4) Persist artefacts
-    out_path = Path("outputs/simulations_curated.parquet")
+    # where we finally write
+    out_path     = Path("outputs/simulations_curated.parquet")
     preview_path = out_path.with_suffix(".preview.csv")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    df.to_parquet(out_path, index=False)
-    df.to_csv(preview_path, index=False)
+    # ─── 1 · pass-1 : row-local cleaning  →   tmp_pass1.parquet  ─────────────
+    tmp_pass1 = out_path.with_suffix(".pass1.parquet")
+    first_w   = None
+    for batch in tqdm(
+            pq.ParquetFile(parquet_path).iter_batches(batch_size=500_000),
+            unit="batch", desc="curate-pass-1"):
+        chunk = (batch.to_pandas()
+                   .pipe(_flatten_x)
+                   .pipe(_add_intensity)
+                   .pipe(_add_effective_skills)
+                   .pipe(_add_queue_kpis)
+                   .pipe(_add_evaluator_gap))
+        validator.SCHEMA.validate(chunk, lazy=True)   # slice-level schema
 
-    print(f"[curation] ✅ wrote {len(df):,} rows  →  {out_path}")
-    print(f"[curation] 📄 preview (10 rows)      →  {preview_path}")
+        tbl = pa.Table.from_pandas(chunk, preserve_index=False)
+        if first_w is None:
+            first_w = pq.ParquetWriter(tmp_pass1, tbl.schema)
+        first_w.write_table(tbl)
+    if first_w is None:
+        raise RuntimeError("Input parquet is empty – nothing to curate.")
+    first_w.close()
 
+    # ─── 2 · pass-2 : cross-row KPIs, stream again, rewrite final file ──────
+    prev_Y   : dict[str, float]        = {}          # scenario_id ➜ last-period Y
+    totals_Y : dict[tuple, float]      = {}          # (scn,t) ➜ ΣY (for market-share)
+    writer2  : pq.ParquetWriter | None = None
+
+    # 2a. first light scan just to collect ΣY per (scenario_id,t)
+    for b in pq.ParquetFile(tmp_pass1).iter_batches(batch_size=500_000):
+        f = b.select(["scenario_id", "t", "Y_new"]).to_pandas()
+        g = f.groupby(["scenario_id", "t"])["Y_new"].sum()
+        for key, val in g.items():
+            totals_Y[key] = totals_Y.get(key, 0.0) + float(val)
+        del f, g
+
+    # 2b. real second pass -- compute growth, market_share, etc. row-by-row
+    for batch in tqdm(
+            pq.ParquetFile(tmp_pass1).iter_batches(batch_size=500_000),
+            unit="batch", desc="curate-pass-2"):
+        df = batch.to_pandas()
+        df.sort_values(["scenario_id", "t"], inplace=True)
+
+        # y-growth needs previous period’s Y_new
+        df["prev_Y"]       = df["scenario_id"].map(prev_Y)
+        df["y_growth_pct"] = ((df["Y_new"] - df["prev_Y"])
+                              / df["prev_Y"]).fillna(0.0).astype("float64")
+        prev_Y.update(df.groupby("scenario_id")["Y_new"].last())
+
+        # market_share uses the pre-computed totals
+        df["market_share"] = df.apply(
+            lambda r: r["Y_new"] / totals_Y[(r["scenario_id"], r["t"])]
+            if totals_Y[(r["scenario_id"], r["t"])] else np.nan,
+            axis=1).astype("float64")
+
+        # latency-decay, spillovers, SG&A overlay and tot_output
+        df = (df.drop(columns="prev_Y")
+                .pipe(_add_market_and_decay)
+                .pipe(_add_spillover_and_unf)
+                .pipe(_sgna_merge))
+
+        tbl = pa.Table.from_pandas(df, preserve_index=False)
+        if writer2 is None:
+            writer2 = pq.ParquetWriter(out_path, tbl.schema)
+        writer2.write_table(tbl)
+
+    writer2.close()
+    tmp_pass1.unlink(missing_ok=True)                # tidy up
+
+    # small 10-row preview for humans
+    pd.read_parquet(out_path).head(10).to_csv(preview_path, index=False)
+    print(f"[curation] ✅ wrote {int(pq.ParquetFile(out_path).metadata.num_rows):,} rows → {out_path}")
+    print(f"[curation] 📄 preview (10 rows)         → {preview_path}")
 
 if __name__ == "__main__":        # CLI:  python -m curation  (optional)
     curate()

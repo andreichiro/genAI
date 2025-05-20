@@ -17,15 +17,15 @@ import yaml
 from tqdm import tqdm    # lightweight progress bar
 import sys
 import textwrap 
-from validator import SCHEMA
 import matplotlib.pyplot as _plt
 import plotly.express      as _px
+import pyarrow.parquet as pq 
 
 _LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 _ROOT = Path(__file__).resolve().parent
-_CFG_YAML = _ROOT / "scenarios.yaml"                              # ← [NEW]
+_CFG_YAML = _ROOT / "scenarios.yaml"                             
 
 # sensible fall-backs (project-relative defaults)
 _DEFAULTS = {
@@ -45,6 +45,8 @@ except Exception as _e:
 _DATA      = Path(_PATHS.get("out_cur",  _DEFAULTS["out_cur"])).resolve()   
 _DIR_PNG   = Path(_PATHS.get("fig_png",  _DEFAULTS["fig_png"])).resolve()  
 _DIR_HTML  = Path(_PATHS.get("fig_html", _DEFAULTS["fig_html"])).resolve()  
+
+
 _PLOT_SPECS = _ROOT / "plot_specs.yaml"                                      
 _META_COLS = ["scenario_id", "test_label", "hypothesis"]
 
@@ -54,40 +56,45 @@ def _wrap_label(text: str, width: int = 25) -> str:
 
 def _pivot(df: pd.DataFrame, metric: str) -> pd.DataFrame:
     """
-    Return a wide dataframe indexed by t and with one column per series:
-      • most metrics → scenario-level line (columns=scenario_id)
-      • market_share → scenario+firm lines (columns=scenario|firm)
+    Build a wide t × series table *with an inner tqdm bar* so that
+    progress is visible on huge datasets.
+
+      • most metrics   → one series per scenario
+      • market_share   → one series per scenario + firm
     """
+    # ── create a helper column `_col` with the legend label 
     if metric == "market_share":
-        cols = ["scenario_id", "firm_id"]
-        col_name = df[cols].astype(str).agg(" – ".join, axis=1)
+        df = df.copy()
+        df["_col"] = (
+            df[["scenario_id", "firm_id"]]
+            .astype(str)
+            .agg(" – ".join, axis=1)             # e.g.  A123 – 7
+        )
     else:
-        # Concatenate scenario_id · test_label · hypothesis and wrap nicely
-        col_name = (df[_META_COLS]
-                      .astype(str)
-                      .agg(" | ".join, axis=1)
-                      .map(_wrap_label))
+        meta_cols = [c for c in _META_COLS if c in df.columns]
+        df = df.copy()
+        df["_col"] = (
+            df[meta_cols]
+            .astype(str)
+            .agg(" | ".join, axis=1)
+            .map(_wrap_label)
+        )
 
+    # ── incremental pivot (one t-slice at a time) 
+    CHUNK = 2_000_000                # rows per chunk (~400 MB RAM)
+    parts = []
+    for i in tqdm(range(0, len(df), CHUNK),
+                  desc=f"pivot-{metric}", leave=False):
+        part = (df.iloc[i:i+CHUNK]
+                  .groupby(["t", "_col"], sort=False)[metric]
+                  .mean()
+                  .unstack("_col"))
+        parts.append(part)
 
-    wide = (df.assign(_col=col_name)
-              .pivot_table(index="t", columns="_col", values=metric,
-                           aggfunc="mean")     # duplicates averaged
-              .sort_index()
-              .dropna(how="all", axis=1))    
-    
-    if wide.dropna(axis=1, how="all").empty:
-        wide = (df.assign(_col=col_name)
-                  .pivot_table(index="t", columns="_col", values=metric,
-                               aggfunc="first")          # no aggregation
-                  .sort_index())
-
-    if wide.isna().all().all():                              
-        wide = (                                             
-            df.pivot(index="t",                              
-                     columns=["scenario_id", "firm_id"],      
-                     values=metric)                          
-              .sort_index())                                 
-
+    wide = (pd.concat(parts)
+              .groupby(level=0)      # merge identical t-indices
+              .first()
+              .sort_index())
     return wide
 
 def _load_specs() -> dict:
@@ -160,7 +167,7 @@ def _draw(metric: str, spec: dict, wide: pd.DataFrame,
         return                                                     
 
     # -------- Matplotlib
-    _palette = _plt.cm.get_cmap("tab20").colors
+    _palette = _plt.colormaps.get_cmap("tab20").colors
     ax = wide.plot(figsize=(6,3), lw=1.5, marker="o", color=_palette)
     ax.set_title(spec.get("title", metric))
     ax.set_xlabel("Year t")
@@ -184,29 +191,43 @@ def render_all() -> None:
     Main orchestration: validate data, then loop over every metric defined
     in plot_specs.yaml and produce a PNG + HTML.
     """
-    df = pd.read_parquet(_DATA)
-    SCHEMA.validate(df, lazy=True)          # D-1 safety net
-
-    # --------------------------------------------------------------- ### NEW ###
-
-    # remove heavy columns not needed for plotting (vector x_values)
-    if "x_values" in df.columns:
-        df = df.drop(columns="x_values")
-
-
     specs = _load_specs()
-    _DIR_PNG.mkdir(exist_ok=True, parents=True)
-    _DIR_HTML.mkdir(exist_ok=True, parents=True)
+
+    _DIR_PNG.mkdir(parents=True, exist_ok=True)
+    _DIR_HTML.mkdir(parents=True, exist_ok=True)
+
+    # ── READ THE PARQUET ONLY ONCE  ──────────────────────────────────────
+    _LOG.info("→ loading curated dataset …")
+    # grab *all* meta columns plus the union of metrics we’ll plot
+    _avail = set(pq.ParquetFile(_DATA).schema.names)   # ← NEW
+
+    # grab *all* meta columns plus the union of metrics we’ll plot
+    all_metrics = set(specs.keys()) | {"market_share"}          # market_share needs firm_id
+
+    # request only the columns that really exist in the parquet  ↓ NEW ↓
+    cols = [c for c in (["t", "firm_id", *_META_COLS, *all_metrics]) if c in _avail]
+
+    df_full = pd.read_parquet(_DATA, columns=cols)
+
+    _LOG.info("   dataset in RAM: %d rows × %d columns", *df_full.shape)
 
     for metric, spec in tqdm(specs.items(), desc="plots"):
-        # 1️⃣  availability check
-        
-        if metric not in df.columns or df[metric].isna().all():
+        # ----------------------------------------------------------------
+        if metric not in df_full.columns or df_full[metric].isna().all():
             _LOG.warning("Metric '%s' missing or all-NaN – skipped.", metric)
             continue
 
-        # 2️⃣  reshape to wide format (handles firm-level vs scenario-level)
+        _LOG.info("   ↳ pivoting %s …", metric)           # ← add
+        _t0 = pd.Timestamp.now()                          # ← add
+
+        # keep only the columns needed for this metric ↓
+        df = df_full[["t", *(_META_COLS),
+                      *(["firm_id"] if metric == "market_share" else []),
+                      metric]].copy()
+
         wide = _pivot(df, metric)
+        _LOG.info("     done in %s", pd.Timestamp.now() - _t0)  # ← add
+
         if wide.empty:
             _LOG.warning("Metric '%s' has no finite data – skipped.", metric)
             continue
@@ -215,9 +236,7 @@ def render_all() -> None:
               _DIR_PNG  / f"{metric}.png",
               _DIR_HTML / f"{metric}.html")
 
-
-    _LOG.info("Phase D finished ✓")
-
+    _LOG.info("finished ✓")
 
 if __name__ == "__main__":          # CLI entry-point
     # Allow `python -m visualise` **or** `python visualise.py`
