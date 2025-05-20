@@ -20,6 +20,20 @@ import textwrap
 import matplotlib.pyplot as _plt
 import plotly.express      as _px
 import pyarrow.parquet as pq 
+import pyarrow as pa 
+import json   
+import time 
+try:
+    import hvplot.pandas        # auto-registers .hvplot accessor
+    from holoviews.operation.datashader import datashade
+    _HAS_DASH = True
+except ImportError:              # pragma: no cover
+    _HAS_DASH = False
+
+try:
+    import validator                       # project-local schema module
+except ImportError:                        # allow visualisation without it
+    validator = None
 
 _LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -49,6 +63,14 @@ _DIR_HTML  = Path(_PATHS.get("fig_html", _DEFAULTS["fig_html"])).resolve()
 
 _PLOT_SPECS = _ROOT / "plot_specs.yaml"                                      
 _META_COLS = ["scenario_id", "test_label", "hypothesis"]
+
+# fan-chart 
+_QUANTS_PARQ = _ROOT / "outputs" / "group_quantiles.parquet"
+_EXPRESSIVE  = json.loads(
+    Path(_ROOT / "outputs" / "expressive_scenarios.json").read_text()
+    if ( _ROOT / "outputs" / "expressive_scenarios.json").exists() else "{}"
+)
+
 
 def _wrap_label(text: str, width: int = 25) -> str:             
     """Return *text* wrapped to the given *width* so legends never overflow."""
@@ -132,7 +154,10 @@ def _interactive_lineplot(df: pd.DataFrame, metric: str, spec: dict, out_html: P
     fig.write_html(out_html, include_plotlyjs="cdn")
 
 def _draw(metric: str, spec: dict, wide: pd.DataFrame,
-          out_png: Path, out_html: Path) -> None:
+          out_png: Path, out_html: Path,
+          *,
+          group_label: str,
+          df_long: pd.DataFrame) -> None:
 
     # *market-share* needs firm-level traces in the legend
 
@@ -166,31 +191,112 @@ def _draw(metric: str, spec: dict, wide: pd.DataFrame,
         fig.write_html(out_html, include_plotlyjs="cdn")         
         return                                                     
 
-    # -------- Matplotlib
-    _palette = _plt.colormaps.get_cmap("tab20").colors
-    ax = wide.plot(figsize=(6,3), lw=1.5, marker="o", color=_palette)
-    ax.set_title(spec.get("title", metric))
+    #  density backdrop (Datashader) 
+    if _HAS_DASH and wide.shape[1] > 100:
+        import holoviews as hv
+        hv.extension("bokeh")                               # idempotent
+
+        # stack into one long column so every point has the *same*
+        # data variable → avoids the xarray merge error raised by
+        # datashader when column names differ.
+        long_df = (
+            wide.reset_index()
+                .melt(id_vars="t", value_name="val")        # 'series' col unused
+                .dropna(subset=["val"])
+        )
+
+        base = long_df.hvplot.scatter(
+            x="t", y="val",                                 # common variable name
+            width=650, height=300,
+            xaxis=None, yaxis=None
+        )
+
+        dens = datashade(base, cmap="Greys", dynamic=False) # static Image, no DMap
+        dens = dens.opts(
+            title=f"{spec.get('title', metric)}  |  {group_label}",
+            axiswise=True
+        )
+
+        try:
+            hv.save(dens,
+                    str(out_html.with_suffix(".density.html")),
+                    backend="bokeh")
+        except Exception as exc:              # pragma: no cover
+            _LOG.warning("Skipping density save – %s", exc)
+
+
+
+    #  fan-chart + expressive lines (Matplotlib) 
+    fig, ax = _plt.subplots(figsize=(6.4, 3.6))
+
+    # quantile ribbons
+    if _QUANTS_PARQ.exists():
+        q_cols_core = [f"{metric}_{q}" for q in ("p25","p75","p05","p95","p50")]
+        q_cols_ext  = [c for c in (f"{metric}_min", f"{metric}_max")
+                       if ( _QUANTS_PARQ.exists()
+                            and c in pq.ParquetFile(_QUANTS_PARQ).schema.names)]
+        q_cols = q_cols_core + q_cols_ext
+        q_df = (pd.read_parquet(_QUANTS_PARQ, columns=["test_label", "t", *q_cols])
+                  .query("test_label == @group_label"))
+        if not q_df.empty:
+            ax.fill_between(q_df["t"], q_df[f"{metric}_p25"], q_df[f"{metric}_p75"],
+                            color="C0", alpha=0.20, label="IQR")
+            ax.fill_between(q_df["t"], q_df[f"{metric}_p05"], q_df[f"{metric}_p95"],
+                            color="C0", alpha=0.10, label="P5–P95")
+            ax.plot(q_df["t"], q_df[f"{metric}_p50"], color="black",
+                    lw=1.6, label="median")
+            if f"{metric}_min" in q_df.columns:
+                ax.plot(q_df["t"], q_df[f"{metric}_min"], ls="--",
+                         color="grey", lw=0.8)
+                ax.plot(q_df["t"], q_df[f"{metric}_max"], ls="--",
+                        color="grey", lw=0.8)
+
+    # expressive scenario lines
+    key = f"{group_label}|{metric}"
+    ids = _EXPRESSIVE.get(key, [])[:5]
+    if not ids:
+        # deterministic median-path fallback 
+        grp = (df_long.groupby("scenario_id")[["t", metric]]
+                        .apply(lambda g: g.set_index("t")[metric]))
+        p50 = grp.unstack(level=0).median(axis=1)          # series indexed by t
+
+        # squared L2 distance to the p50 curve
+        dist = {sid: ((series - p50).pow(2).sum())
+                for sid, series in grp.groupby(level=0, axis=1)}
+        fallback_id = min(dist, key=dist.get)
+        ids = [fallback_id]
+            
+    for i, sid in enumerate(ids):
+        sub = df_long.loc[df_long["scenario_id"] == sid]
+        ax.plot(sub["t"], sub[metric], lw=1.5, label=_wrap_label(sid), color=f"C{i}")
+
+    ax.set_title(f"{spec.get('title', metric)}  |  {group_label}")
     ax.set_xlabel("Year t")
     ax.set_ylabel(spec.get("ylabel", metric))
-    if spec.get("log_y"): ax.set_yscale("log")
-    ax.legend(fontsize="x-small", ncol=2, loc="best")
-    ax.figure.tight_layout()
-    ax.figure.savefig(out_png, dpi=300)
-    _plt.close(ax.figure)
+    if spec.get("log_y"):
+        ax.set_yscale("log")
 
-    # -------- Plotly
-    fig = _px.line(wide, x=wide.index, y=wide.columns,
-                   labels={"x": "Year t", "value": spec.get("ylabel", metric)},
-                   title=spec.get("title", metric),
-                   log_y=bool(spec.get("log_y", False)))
+    ax.legend(fontsize="x-small", ncol=3, loc="best")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=300)
+    _plt.close(fig)
 
-    fig.write_html(out_html, include_plotlyjs="cdn")
+    # interactive thin-lines Plotly (≤20 series) 
+    if 0 < len(ids) <= 20:
+        fig = _px.line(df_long.loc[df_long["scenario_id"].isin(ids)],
+                       x="t", y=metric, color="scenario_id",
+                       title=ax.get_title(),
+                       labels={"t": "Year t", metric: spec.get("ylabel", metric)},
+                       log_y=bool(spec.get("log_y", False)))
+        fig.write_html(out_html, include_plotlyjs="cdn")
+
 
 def render_all() -> None:
     """
     Main orchestration: validate data, then loop over every metric defined
     in plot_specs.yaml and produce a PNG + HTML.
     """
+
     specs = _load_specs()
 
     _DIR_PNG.mkdir(parents=True, exist_ok=True)
@@ -198,6 +304,7 @@ def render_all() -> None:
 
     # ── READ THE PARQUET ONLY ONCE  ──────────────────────────────────────
     _LOG.info("→ loading curated dataset …")
+    _t0 = time.perf_counter()        
     # grab *all* meta columns plus the union of metrics we’ll plot
     _avail = set(pq.ParquetFile(_DATA).schema.names)   # ← NEW
 
@@ -205,39 +312,59 @@ def render_all() -> None:
     all_metrics = set(specs.keys()) | {"market_share"}          # market_share needs firm_id
 
     # request only the columns that really exist in the parquet  ↓ NEW ↓
-    cols = [c for c in (["t", "firm_id", *_META_COLS, *all_metrics]) if c in _avail]
+    schema_cols = list(validator.SCHEMA.columns.keys()) if validator else []
+    base_cols   = ["t", "firm_id", *_META_COLS, *all_metrics]
+    cols_all    = [c for c in (base_cols + schema_cols) if c in _avail]
 
-    df_full = pd.read_parquet(_DATA, columns=cols)
+    pf = pq.ParquetFile(_DATA)
+    parts: list[pd.DataFrame] = []
+    for batch in tqdm(
+            pf.iter_batches(columns=cols_all, batch_size=2_000_000),
+            total=pf.num_row_groups,
+            desc="read-parquet"):
+        parts.append(pa.Table.from_batches([batch]).to_pandas())
 
-    _LOG.info("   dataset in RAM: %d rows × %d columns", *df_full.shape)
+    df_full = pd.concat(parts, ignore_index=True)
+
+    _LOG.info("   loaded %s rows × %s cols (≈%.1f MB) in %.1f s",
+              len(df_full), df_full.shape[1],
+              df_full.memory_usage(deep=True).sum() / 1e6,
+              time.perf_counter() - _t0)
+
+    if validator:
+        validator.SCHEMA.validate(df_full, lazy=True)
 
     for metric, spec in tqdm(specs.items(), desc="plots"):
-        # ----------------------------------------------------------------
+
         if metric not in df_full.columns or df_full[metric].isna().all():
             _LOG.warning("Metric '%s' missing or all-NaN – skipped.", metric)
             continue
 
-        _LOG.info("   ↳ pivoting %s …", metric)           # ← add
-        _t0 = pd.Timestamp.now()                          # ← add
+        # after validation, trim to the columns we really need
+        df_metric = df_full[["t", *(_META_COLS),
+                             *(["firm_id"] if metric == "market_share" else []),
+                             metric]].copy()
+        #  facet by test_label 
+        for grp_name, df in df_metric.groupby("test_label", sort=False):
+            _LOG.info("   ↳ pivoting %s | %s …", metric, grp_name)
+            _t0 = pd.Timestamp.now()
 
-        # keep only the columns needed for this metric ↓
-        df = df_full[["t", *(_META_COLS),
-                      *(["firm_id"] if metric == "market_share" else []),
-                      metric]].copy()
+            wide = _pivot(df, metric)
+            _LOG.info("     done in %s", pd.Timestamp.now() - _t0)
 
-        wide = _pivot(df, metric)
-        _LOG.info("     done in %s", pd.Timestamp.now() - _t0)  # ← add
+            if wide.empty:
+                _LOG.warning("Metric '%s' (%s) has no finite data – skipped.",
+                             metric, grp_name)
+                continue
 
-        if wide.empty:
-            _LOG.warning("Metric '%s' has no finite data – skipped.", metric)
-            continue
-
-        _draw(metric, spec, wide,
-              _DIR_PNG  / f"{metric}.png",
-              _DIR_HTML / f"{metric}.html")
-
-    _LOG.info("finished ✓")
-
+            stem = f"{metric}__{grp_name}"
+            _draw(metric, spec, wide,
+                  _DIR_PNG  / f"{stem}.png",
+                  _DIR_HTML / f"{stem}.html",
+                  group_label=grp_name,
+                  df_long=df)
+    
+    _LOG.info("finished – plotted to %s and %s", _DIR_PNG, _DIR_HTML)
 if __name__ == "__main__":          # CLI entry-point
     # Allow `python -m visualise` **or** `python visualise.py`
     if __package__ is None:

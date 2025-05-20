@@ -16,6 +16,7 @@ import logging
 from tqdm import tqdm  
 import pyarrow.parquet as pq         
 import pyarrow as pa
+import json, itertools
 
 _EXPECTED_ORDER: Final = [
     "scenario_id", "test_label", "hypothesis",
@@ -23,6 +24,9 @@ _EXPECTED_ORDER: Final = [
     "Y_new",      
     "psi_eff", "theta", "queue_len",
 ]
+
+_EXPRESSIVE_JSON = Path("outputs") / "expressive_scenarios.json"
+_QUANT_PARQUET   = Path("outputs") / "group_quantiles.parquet"
 
 _DERIVED_COLS: Final = [
     "y_growth_pct",
@@ -275,6 +279,81 @@ def _add_spillover_and_unf(df: pd.DataFrame) -> pd.DataFrame:
     add["spillover_gain"] = grp["spillover_gain"].mean()
     return df.merge(add.reset_index(), on=["scenario_id", "t"], how="left")
 
+def _write_group_quantiles(out_parquet: Path,
+                           metrics: list[str]) -> None:
+    """
+    Create a compact file   test_label × t × (min…p95…max)   for every metric.
+    File size ≲ 3 MB; recalculation time ≲ 2 s on 35 M rows.
+    """
+    use_cols = ["test_label", "t", *metrics]
+    df = pd.read_parquet(out_parquet, columns=use_cols)
+
+    aggs = {}
+    for m in metrics:
+        aggs.update({
+            f"{m}_min": (m, "min"),
+            f"{m}_p05": (m, lambda s: s.quantile(0.05)),
+            f"{m}_p25": (m, lambda s: s.quantile(0.25)),
+            f"{m}_p50": (m, "median"),
+            f"{m}_p75": (m, lambda s: s.quantile(0.75)),
+            f"{m}_p95": (m, lambda s: s.quantile(0.95)),
+            f"{m}_max": (m, "max"),
+        })
+
+    stats = (df
+             .groupby(["test_label", "t"])
+             .agg(**aggs)
+             .reset_index())
+
+    _QUANT_PARQUET.parent.mkdir(parents=True, exist_ok=True)
+    stats.to_parquet(_QUANT_PARQUET, index=False)
+    print(f"[curation] 📊 group_quantiles.parquet → {_QUANT_PARQUET}")
+
+def _compute_expressive_scenarios(out_parquet: Path,
+                                  metrics: list[str],
+                                  k: int = 5) -> None:
+    """
+    Build a {<group>|<metric>: [scenario_ids]} json for plotting overlays.
+    Group ≔ test_label.
+    """
+    df = pd.read_parquet(out_parquet, columns=["scenario_id",
+                                               "test_label", "t", *metrics])
+    result: dict[str, list[str]] = {}
+
+    for metric in metrics:
+        sub = df[["scenario_id", "test_label", "t", metric]].dropna()
+        # summaries at scenario-level
+        g_last = (sub.sort_values("t")
+                    .groupby("scenario_id")[metric]
+                    .last())
+        g_sum  = sub.groupby("scenario_id")[metric].sum()
+        g_std  = sub.groupby("scenario_id")[metric].std()
+        summary = (pd.concat({"last": g_last,
+                              "cum":  g_sum,
+                              "std":  g_std}, axis=1)
+                     .reset_index())
+        # add grouping key
+        summary["group"] = (sub
+                            .groupby("scenario_id")["test_label"]
+                            .first()
+                            .reindex(summary["scenario_id"])
+                            .values)
+
+        for grp, grp_df in summary.groupby("group"):
+            # pick expressive IDs
+            picks = [
+                grp_df.loc[grp_df["last"].idxmax(), "scenario_id"],
+                grp_df.loc[grp_df["last"].idxmin(), "scenario_id"],
+                grp_df.loc[grp_df["cum" ].idxmax(), "scenario_id"],
+                grp_df.loc[grp_df["cum" ].idxmin(), "scenario_id"],
+                grp_df.loc[(grp_df["last"] - grp_df["last"].median()).abs()
+                           .idxmin(), "scenario_id"],
+            ]
+            key = f"{grp}|{metric}"
+            result[key] = list(dict.fromkeys(picks))[:k]
+
+    _EXPRESSIVE_JSON.write_text(json.dumps(result, indent=2))
+
 def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     """One-file, two-stream curator – never loads the whole dataset in RAM."""
     # ─── 0 · SG&A overlay ────────────────────────────────────────────────────
@@ -347,6 +426,7 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
         # latency-decay, spillovers, SG&A overlay and tot_output
         df = (df.drop(columns="prev_Y")
                 .pipe(_add_market_and_decay)
+                .pipe(_add_tot_output)          # fan-chart base metric
                 .pipe(_add_spillover_and_unf)
                 .pipe(_sgna_merge))
 
@@ -362,6 +442,25 @@ def curate(parquet_path: str = "outputs/simulations.parquet") -> None:
     pd.read_parquet(out_path).head(10).to_csv(preview_path, index=False)
     print(f"[curation] ✅ wrote {int(pq.ParquetFile(out_path).metadata.num_rows):,} rows → {out_path}")
     print(f"[curation] 📄 preview (10 rows)         → {preview_path}")
+
+    _compute_expressive_scenarios(
+        out_parquet=out_path,
+        metrics=[                               # every metric we plot later
+            "y_growth_pct", "capital_intensity", "rd_share", "market_share",
+            "congestion_idx", "creativity_loss_pct", "y_new_tot"
+        ],
+        k=5,                                    # top-K exemplar lines
+    )
+    print(f"[curation] 📑 expressive_scenarios.json → {_EXPRESSIVE_JSON}")
+
+    #one-shot fan-stats parquet
+    _write_group_quantiles(
+        out_parquet=out_path,
+        metrics=[
+            "y_growth_pct", "capital_intensity", "rd_share", "market_share",
+            "congestion_idx", "creativity_loss_pct", "y_new_tot"
+        ],
+    )
 
 if __name__ == "__main__":        # CLI:  python -m curation  (optional)
     curate()
