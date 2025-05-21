@@ -28,17 +28,33 @@ def _resume_filter(scenarios: List[ScenarioECB],
         return scenarios
 
     try:
-        finished_ids: Set[str] = set(pd.read_parquet(parquet_path)["scenario_id"].unique())
+        finished_ids: Set[str] = set(
+            pd.read_parquet(parquet_path)["scenario_id"].unique()
+        )
     except Exception as exc:                           # corrupt / incompatible file?
         logging.warning("Resume skipped: could not read %s (%s)", parquet_path, exc)
         return scenarios
 
-    remaining = [scn for scn in scenarios if scn.id not in finished_ids]
-    dropped   = len(scenarios) - len(remaining)
+     # A scenario is considered "already done" when *either*
+    #   • its new semantic slug  (scn.id)          OR
+    #   • its legacy auto-counter id  (scn.run_id)
+    #   appears in the finished parquet.
+    remaining = [
+        scn for scn in scenarios
+        if scn.id not in finished_ids and               # slug not present
+           (
+               # getattr() avoids AttributeError when run_id missing 
+               (rid := getattr(scn, "run_id", None)) is None
+               or rid not in finished_ids
+           )
+    ]
+
+    dropped = len(scenarios) - len(remaining)
     if dropped:
         logging.info("Resume-mode: %d / %d scenarios already done; skipping.",
                      dropped, len(scenarios))
     return remaining
+
 
 # CLI                                                                         #
 def main(argv: List[str] | None = None) -> None:

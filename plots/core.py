@@ -45,7 +45,12 @@ def lineplot(
         Destination PNG path (parent dir must exist).
     """
     fig, ax = plt.subplots(figsize=(7, 4))
-    for scenario, sub in df.groupby("scenario_id"):                  
+    # ensure the static Matplotlib palette matches the interactive
+    # Plotly palette (`Set2`) so colours stay consistent across outputs 
+    # and remain colour-blind friendly
+    ax.set_prop_cycle(color=plt.get_cmap(_DEFAULT_PALETTE).colors)
+
+    for scenario, sub in df.groupby("scenario_id"):
             # Compose “scenario | label | hypothesis” once per line
             meta_label = _wrap_label(
                 " | ".join(map(str, sub.iloc[0][_META_COLS]))          

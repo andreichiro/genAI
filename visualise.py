@@ -159,7 +159,18 @@ def _draw(metric: str, spec: dict, wide: pd.DataFrame,
           group_label: str,
           df_long: pd.DataFrame) -> None:
 
-    # *market-share* needs firm-level traces in the legend
+    if "firm_id" in df_long.columns:          # only the market-share panel
+        df_long = (df_long
+                   .sort_values("firm_id")    # deterministic pick
+                   .drop_duplicates(["scenario_id", "t"]))
+    else:
+        df_long = df_long.drop_duplicates(["scenario_id", "t"])
+
+    df_long = df_long.dropna(subset=[metric])
+    if df_long.empty:                         # nothing left to draw
+        _LOG.warning("Metric '%s' | %s has no finite data – skipped.",
+                     metric, group_label)
+        return
 
     if metric == "market_share":                                  
         long = (wide.reset_index()                               
@@ -190,6 +201,20 @@ def _draw(metric: str, spec: dict, wide: pd.DataFrame,
                        })                                        
         fig.write_html(out_html, include_plotlyjs="cdn")         
         return                                                     
+
+    # Drop unusable series *once* (empty → flat → <2 remain) – Phase-3 guard
+    wide = wide.dropna(axis=1, how="all")
+
+    # 2. deduplicate *identical* columns so we keep ONE copy of any
+    #    flat-line that several scenarios share
+    wide = wide.T.drop_duplicates().T
+
+    # After deduplication we insist on ≥ 2 *unique* series.
+    if wide.shape[1] < 2:
+        _LOG.warning("Metric '%s' | %s has ≤1 unique series – skipped.",
+                     metric, group_label)
+        return
+
 
     #  density backdrop (Datashader) 
     if _HAS_DASH and wide.shape[1] > 100:
@@ -225,47 +250,79 @@ def _draw(metric: str, spec: dict, wide: pd.DataFrame,
             _LOG.warning("Skipping density save – %s", exc)
 
 
-
     #  fan-chart + expressive lines (Matplotlib) 
     fig, ax = _plt.subplots(figsize=(6.4, 3.6))
 
     # quantile ribbons
     if _QUANTS_PARQ.exists():
-        q_cols_core = [f"{metric}_{q}" for q in ("p25","p75","p05","p95","p50")]
-        q_cols_ext  = [c for c in (f"{metric}_min", f"{metric}_max")
-                       if ( _QUANTS_PARQ.exists()
-                            and c in pq.ParquetFile(_QUANTS_PARQ).schema.names)]
-        q_cols = q_cols_core + q_cols_ext
-        q_df = (pd.read_parquet(_QUANTS_PARQ, columns=["test_label", "t", *q_cols])
-                  .query("test_label == @group_label"))
-        if not q_df.empty:
-            ax.fill_between(q_df["t"], q_df[f"{metric}_p25"], q_df[f"{metric}_p75"],
-                            color="C0", alpha=0.20, label="IQR")
-            ax.fill_between(q_df["t"], q_df[f"{metric}_p05"], q_df[f"{metric}_p95"],
-                            color="C0", alpha=0.10, label="P5–P95")
-            ax.plot(q_df["t"], q_df[f"{metric}_p50"], color="black",
-                    lw=1.6, label="median")
-            if f"{metric}_min" in q_df.columns:
-                ax.plot(q_df["t"], q_df[f"{metric}_min"], ls="--",
-                         color="grey", lw=0.8)
-                ax.plot(q_df["t"], q_df[f"{metric}_max"], ls="--",
-                        color="grey", lw=0.8)
+        schema_cols = set(pq.ParquetFile(_QUANTS_PARQ).schema.names)
+
+        wanted_core = [f"{metric}_{q}" for q in ("p25", "p75", "p05", "p95", "p50")]
+        wanted_ext  = [f"{metric}_min", f"{metric}_max"]
+        q_cols      = [c for c in (wanted_core + wanted_ext) if c in schema_cols]
+
+        # nothing pre-computed for this metric → silently skip ribbons
+        if q_cols:
+            cols_to_read = ["test_label", "t", *q_cols]
+            q_df = (pd.read_parquet(_QUANTS_PARQ, columns=cols_to_read)
+                      .query("test_label == @group_label"))
+
+            if not q_df.empty:
+                ax.fill_between(q_df["t"], q_df.get(f"{metric}_p25"),
+                                q_df.get(f"{metric}_p75"),
+                                color="C0", alpha=0.20, label="IQR")
+                ax.fill_between(q_df["t"], q_df.get(f"{metric}_p05"),
+                                q_df.get(f"{metric}_p95"),
+                                color="C0", alpha=0.10, label="P5–P95")
+                ax.plot(q_df["t"], q_df.get(f"{metric}_p50"),
+                        color="black", lw=1.6, label="median")
+                if f"{metric}_min" in q_df.columns:
+                    ax.plot(q_df["t"], q_df[f"{metric}_min"], ls="--",
+                            color="grey", lw=0.8)
+                    ax.plot(q_df["t"], q_df[f"{metric}_max"], ls="--",
+                            color="grey", lw=0.8)
 
     # expressive scenario lines
     key = f"{group_label}|{metric}"
-    ids = _EXPRESSIVE.get(key, [])[:5]
-    if not ids:
-        # deterministic median-path fallback 
-        grp = (df_long.groupby("scenario_id")[["t", metric]]
-                        .apply(lambda g: g.set_index("t")[metric]))
-        p50 = grp.unstack(level=0).median(axis=1)          # series indexed by t
+    ids = [sid for sid in _EXPRESSIVE.get(key, [])                # keep order
+           if df_long.loc[df_long["scenario_id"] == sid, metric].notna().any()]
 
-        # squared L2 distance to the p50 curve
-        dist = {sid: ((series - p50).pow(2).sum())
-                for sid, series in grp.groupby(level=0, axis=1)}
-        fallback_id = min(dist, key=dist.get)
-        ids = [fallback_id]
-            
+    # ---------------------------------------------------------------------
+    # If nothing pre-selected, build a data-driven fallback list
+    # ---------------------------------------------------------------------
+    if not ids:
+        # build a t × scenario table of the metric
+        wide_med = (
+            df_long
+            .pivot_table(index="t",
+                         columns="scenario_id",
+                         values=metric,
+                         aggfunc="mean")          # tolerates dup rows
+            .dropna(axis=1, how="all")            # keep only non-empty columns
+        )
+
+        # no usable series at all → bail out early
+        if wide_med.empty:
+            _LOG.warning("Metric '%s' | %s has no usable data – skipped.",
+                         metric, group_label)
+            return
+
+        # median trajectory across surviving scenarios
+        p50 = wide_med.median(axis=1)
+
+        # squared L2 distance to the median
+        dist = ((wide_med.sub(p50, axis=0)) ** 2).sum(min_count=1)
+
+        # choose the scenario(s) closest to the median path
+        ids = dist.nsmallest(5).index.tolist()
+
+    # finally, guarantee that every id really has data
+    ids = [sid for sid in ids
+           if df_long.loc[df_long["scenario_id"] == sid, metric].notna().any()]
+    if not ids:                       # extreme corner-case
+        sid = df_long.loc[df_long[metric].notna(), "scenario_id"].iloc[0]
+        ids = [sid]
+
     for i, sid in enumerate(ids):
         sub = df_long.loc[df_long["scenario_id"] == sid]
         ax.plot(sub["t"], sub[metric], lw=1.5, label=_wrap_label(sid), color=f"C{i}")
@@ -344,6 +401,16 @@ def render_all() -> None:
         df_metric = df_full[["t", *(_META_COLS),
                              *(["firm_id"] if metric == "market_share" else []),
                              metric]].copy()
+
+        if metric == "market_share":
+            # keep a row per (scenario, firm, t)
+            dedup_cols = ["scenario_id", "firm_id", "t"]
+        else:
+            # other panels only need one row per scenario & period
+            dedup_cols = ["scenario_id", "t"]
+        
+        df_metric = df_metric.drop_duplicates(subset=dedup_cols)
+
         #  facet by test_label 
         for grp_name, df in df_metric.groupby("test_label", sort=False):
             _LOG.info("   ↳ pivoting %s | %s …", metric, grp_name)

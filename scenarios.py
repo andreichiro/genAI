@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Callable, Dict, List, Any, Final      
 from itertools import product
 from collections import OrderedDict
-
+import uuid, json
 import numpy as np
 import yaml
-
 from utils.ecb_params    import ECBParams
 from utils.triage_params import TriageParams         
+
 
 ARCHETYPES: Final = {
     "top",
@@ -71,6 +71,7 @@ class ScenarioECB:
     hypothesis:    str = ""
     tags:          tuple[str, ...] = ()
     spillover_intensity: float = 0.0
+    run_id: str = "" 
     
 # public API 
 def load_scenarios(yaml_path: str | Path = "scenarios.yaml") -> List[ScenarioCfg]:
@@ -111,6 +112,7 @@ def load_scenarios_ecb(
 
             scenario = ScenarioECB(
                 id=row["id"],
+                run_id=row.get("run_id", ""),
                 num_periods=row.get("num_periods", defaults["num_periods"]),
                 firms_init=row["firms_init"],
                 ecb_params=ECBParams(**ecb_cfg),
@@ -128,6 +130,7 @@ def load_scenarios_ecb(
         out.append(
             ScenarioECB(
                 id=auto["id"],
+                run_id=auto.get("run_id", ""),
                 test_label=auto["test_label"],
                 hypothesis=auto["hypothesis"],
                 num_periods=auto["num_periods"],
@@ -148,8 +151,10 @@ def generate_matrix(defaults: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     if "matrix" not in defaults:          # nothing to do
         return []
-
+    
     axes = OrderedDict(defaults["matrix"])
+    axes.setdefault("intangible_mirror", ["on"])
+    axes.setdefault("skill_interaction", ["off"])
     keys, values = axes.keys(), axes.values()
 
     lut = defaults["lookup_tables"]
@@ -158,16 +163,67 @@ def generate_matrix(defaults: Dict[str, Any]) -> List[Dict[str, Any]]:
     for combo in product(*values):
         spec = dict(zip(keys, combo))
 
+        # prune combos & pre-compute axis look-ups
+        # 1.  prune logically redundant combos
+        if spec["threshold_type"] == "none":            # degenerate synergy
+            continue
+        if spec["shock_timing"] == "none" and spec["shock_magnitude"] != "none":
+            continue                                    # magnitude irrelevant
+
+        if spec["shock_magnitude"] == "none" and spec["shock_timing"] != "none":
+           continue
+
+        # 2.  look-up numeric levels
+        gap_mult = lut["evaluator_gap"][spec["evaluator_gap"]]
+        edu_lag  = lut["education_lag"][spec["education_pipeline"]]
+
         invest_block   = lut["invest_patterns"][spec["r_and_d_regime"]]
-        shock_drop_pct = lut["shock_magnitude"][spec["shock_magnitude"]]
+        # safe mapping for “none” level ✱✱✱
+        shock_drop_pct = (
+            0.0
+            if spec["shock_magnitude"] == "none"
+            else lut["shock_magnitude"][spec["shock_magnitude"]]
+        )
+
         eta_decay      = lut["latency_level"][spec["latency_level"]]
         mobility_eps   = lut["mobility"][spec["mobility"]]
         spill_int      = lut["spillover"][spec["spillover"]]
+        mirror_flag    = (spec["intangible_mirror"] == "on")
+        skill_strength = 0.2 if spec["skill_interaction"] == "on" else 0.0
 
-        scn_id = f"auto-{len(scenarios):05d}"
+        #  slug-ID   +   keep legacy run_id for resume logic
+        slug = (
+            f"{spec['r_and_d_regime']}-"
+            f"{spec['threshold_type']}-"
+            f"{spec['evaluator_gap']}-"
+            f"{spec['education_pipeline']}-"
+            f"{spec['mobility']}-"
+            f"{spec['intangible_mirror']}-"
+            f"{spec['skill_interaction']}"
+        )
+        hash8 = uuid.uuid5(uuid.NAMESPACE_URL,
+                           json.dumps(spec, sort_keys=True)).hex[:8]
+        scenario_id = f"{slug}-{hash8}"
+        run_id      = f"auto-{len(scenarios):05d}"          # legacy counter
+
+        # multi-firm setup when evaluator_gap > 1
+        if gap_mult > 1.0:
+            firms_init = [
+                {"id": "Firm-A", "K_AI": 10.0, "U_f": 1.0,
+                 "U_nf": 0.5, "H_nf": 0.3},
+                {"id": "Firm-B", "K_AI": 10.0, "U_f": 1.0,
+                 "U_nf": 0.5 * gap_mult, "H_nf": 0.3},
+            ]
+        else:                                           # gap_mult == 1 ⇒ single
+            firms_init = [
+                {"id": "Solo", "K_AI": 10.0, "U_f": 1.0,
+                 "U_nf": 0.5, "H_nf": 0.3},
+            ]
+
         scenarios.append(
             {
-                "id": scn_id,
+                "id": scenario_id,                     # semantic slug
+                "run_id": run_id,                      # for resume
                 "engine": "ecb",
                 "test_label": f"{spec['r_and_d_regime']}-{spec['threshold_type']}-{spec['shock_timing']}",
                 "hypothesis": (
@@ -176,14 +232,19 @@ def generate_matrix(defaults: Dict[str, Any]) -> List[Dict[str, Any]]:
                     f"{spec['shock_timing']} shocks?"
                 ),
                 "num_periods": defaults["num_periods"],
-                "firms_init": [{"id": scn_id, "K_AI": 10.0, "U_f": 1.0,
-                                "U_nf": 0.5, "H_nf": 0.3}],
+                "firms_init": firms_init,               # per-firm starting stocks  
+
                 "ecb": {
-                    "eta_decay": eta_decay,
+                    "eta_decay":       eta_decay,
                     "mobility_elasticity": mobility_eps,
-                    "shared_pool": spec["shared_pool"] == "yes",
-                    "tau_spillover": spill_int,
+                    "shared_pool":       spec["shared_pool"] == "yes",
+                    "tau_spillover":     spill_int,
+                    "education_lag":      edu_lag, 
+
                 },
+
+                "education_lag": edu_lag,                      
+
                 "params": {
                     "threshold": lut["threshold_map"][spec["threshold_type"]],
                     "shock": {
@@ -192,6 +253,8 @@ def generate_matrix(defaults: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "duration": 5,
                     },
                     **invest_block,
+                    "intangible_mirror": mirror_flag,
+                    "skill_interaction_strength": skill_strength,
                 },
             }
         )

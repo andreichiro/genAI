@@ -213,6 +213,7 @@ def _add_market_and_decay(df: pd.DataFrame) -> pd.DataFrame:
         .clip(lower=0)
         .astype("float64")
     )
+    df["decay_loss"]   = df["Y_lost_decay"]
     df["creativity_loss_pct"] = (
     df["creativity_loss"] / df["Y_new_nominal"].replace(0, np.nan)
     ) * 100.0                                        

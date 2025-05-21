@@ -40,6 +40,21 @@ creativity_loss_pct:
   ylabel: "Lost creative value (%)"
   log_y: false
 
+queue_len:                       # stress-queue-buildup
+  title: "Backlog Queue Length"
+  ylabel: "Ideas waiting for review"
+  log_y: false
+
+decay_loss:                      # stress-decay-active
+  title: "Instantaneous Decay Loss ΔY"
+  ylabel: "ΔY lost to obsolescence"
+  log_y: false
+
+Y_lost_decay:                     #(cumulative)
+  title: "Cumulative Decay Loss Ωᵈ"
+  ylabel: "Ωᵈ (aggregate)"
+  log_y: false
+
 creativity_loss_pct_mean:
   title: "Creativity Loss (% of nominal)"
   ylabel: "% of Y_nominal"
@@ -94,7 +109,7 @@ spillover_gain:
   title: "Knowledge Spill-over Gain Ω(t)"
   ylabel: "Ω(t)"
   log_y: false
-  
+
 Y_new_nominal:
   title: "Nominal Output (no decay)"
   ylabel: "Y_nominal"

@@ -32,7 +32,10 @@ SCHEMA = pa.DataFrameSchema(
         "std_latency":     Column(float, Check.ge(0), nullable=True),  # dispersion of waits
         "creativity_loss": Column(float, nullable=True, required=False),  # ΔY from idea decay
         "triage_eff":      Column(float, [Check.ge(0), Check.le(1)], nullable=True),  # accepted/total
-        
+
+        "education_lag":   Column(int,   Check.ge(0), nullable=True, required=False),
+        "latency_level":   Column(float, Check.ge(0), nullable=True, required=False),
+
         "evaluator_gap":   Column(float, Check.ge(0), nullable=True, required=False),  
         "U_nf_mean":       Column(float, Check.ge(0), nullable=True, required=False),  
         "spillover_gain":  Column(float, nullable=True, required=False),               
@@ -46,6 +49,9 @@ SCHEMA = pa.DataFrameSchema(
         "creativity_loss_pct_mean": Column(float, nullable=True, required=False),   # %
         "H_nf_mean":                Column(float, nullable=True, required=False),   # evaluator stock
    
+        "decay_loss":      Column(float, Check.ge(0),  nullable=True, required=False),
+        "spillover_gain":  Column(float,               nullable=True, required=False),
+
         # evaluator stocks 
         "Uf":  Column(float, Check.ge(0), nullable=True, required=False),
         "Unf": Column(float, Check.ge(0), nullable=True, required=False),

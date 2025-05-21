@@ -63,6 +63,9 @@ defaults:
     latency_level:   {off: 0.00, low: 0.02, medium: 0.08, high: 0.20}
     mobility:        {low: 0.00, medium: 0.10, high: 0.30}
     spillover:       {low: 0.00, medium: 0.20, high: 0.40}
+    evaluator_gap:     {none: 1.0,  low: 2.0,  medium: 4.0, high: 8.0}
+    education_lag:     {off:  0,    short_lag: 2,  medium_lag: 4, long_lag: 8}
+
     threshold_map:
       none:        {shape: "none"}
       smooth:      {shape: "smooth", steepness: 1.0}
@@ -74,15 +77,17 @@ defaults:
   matrix:                                   # <— now aligned with defaults:
     r_and_d_regime:    [A, B, C, D, E, F, G, H, I, J]
     threshold_type:    [none, smooth, cliff_early, cliff_mid, cliff_late]
-    shock_timing:      [none, early, mid, late]
-    shock_magnitude:   [low, medium, high]
+    shock_timing:      [early, mid, late, none]
+    shock_magnitude:   [low, medium, high, none]  
     latency_level:     [off, low, medium, high]
     mobility:          [low, medium, high]
     spillover:         [low, medium, high]
     shared_pool:       ["yes", "no"]
     evaluator_gap:     [none, low, medium, high]
     education_pipeline: [off, short_lag, medium_lag, long_lag]
-
+    intangible_mirror:  ["on", "off"] 
+    skill_interaction: ["off", "on"]
+    
 scenarios:
   # exemplar quartet 
   - id: top-smooth-boom-prod-early      # ← scenario ID (free text)
@@ -252,6 +257,64 @@ scenarios:
       enroll_const:      5.0          # ← non-zero seed flow
       retire_rate:       0.02
       initial_trainees:  50.0         # ← initial pool size
+
+  - id: stress-queue-buildup
+    archetype: latency_decay        # groups with existing latency plots
+    engine:    ecb
+    test_label: stress              # ← phase-2 tag
+    threshold: smooth
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: knowledge_scaled
+    firms_init:
+      - {id: "stress-queue-buildup", K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+    ecb:
+      # dial-up arrival rate & shrink evaluator bandwidth ⇒ backlog
+      lambda_poisson:   0.25      # > default 0.10
+      eta_congestion:   0.01      # < default 0.05
+    params:
+      steady: {invest_rate: 0.06}
+      labor:  {rd_share_high: 0.15, rd_share_low: 0.05}
+
+  - id: stress-triage-on
+    archetype: latency_decay
+    engine:    ecb
+    test_label: stress
+    threshold: smooth
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: knowledge_scaled
+    firms_init:
+      - {id: "stress-triage-on", K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+    triage:
+      # activate percentile-based triage filter
+      threshold_rule:  percentile
+      threshold_value: 50.0
+    params:
+      steady: {invest_rate: 0.06}
+      labor:  {rd_share_high: 0.15, rd_share_low: 0.05}
+
+  - id: stress-decay-active
+    archetype: latency_decay
+    engine:    ecb
+    test_label: stress
+    threshold: smooth
+    investment_path: steady
+    labor_split: production_heavy
+    shock_timing: none
+    x_updater: knowledge_scaled
+    firms_init:
+      - {id: "stress-decay-active", K_AI: 10.0, U_f: 1.0, U_nf: 0.5, H_nf: 0.3}
+    ecb:
+      # accelerate knowledge obsolescence
+      eta_decay: 0.15              # > default 0.20 but visible
+    params:
+      steady:             {invest_rate: 0.06}
+      labor:              {rd_share_high: 0.15, rd_share_low: 0.05}
+      intangible_mirror:  false     # decouple intangibles from synergy
+
 
 # Add more scenarios by appending to the list above – no Python changes
 
