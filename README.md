@@ -69,7 +69,10 @@ Each firm has a limited **screening/evaluation capacity** per period, denoted $\
     
     Here $\xi_1$ is a weighting parameter for non-fungible capital and $\zeta_{\text{skill}}$ is a skill exponent. This formulation means $U_{nf}$ is amplified by the skill level of the evaluators (with diminishing returns if $0<\zeta_{\text{skill}}<1$). A firm with more or better-skilled evaluators has higher effective capital. However, $U_f$ contributes linearly (it might be, e.g., software or tools that scale without skill).
     
-- **Congestion Externality:** If many firms have high evaluation capacity, they may face an **industry-wide congestion** in evaluating ideas (e.g. overlapping searches, competition for the “easy” ideas). The model captures this by reducing each firm’s effective throughput when rivals are strong. Let $\overline{U}{-i}$ *be the **mean** $U{\text{tot}}$* of other firms. Then the *effective* throughput $\Psi_{\text{eff}}$ is given by:
+- **Congestion Externality:** If many firms have high evaluation capacity, they may face an **industry-wide congestion** in evaluating ideas (e.g. overlapping searches, competition for the “easy” ideas). The model captures this by reducing each firm’s effective throughput when rivals are strong. 
+
+Let $\overline{U}_{-i}$ be the mean $U_{\text{tot}}$ of the other firms.
+Then the *effective* throughput $\Psi_{\text{eff}}$ is given by:
 - $Ψeff=1+ηcongestionU−iΨraw(Utot)$,
     
     $Ψeff  =  Ψraw(Utot) 1  +  ηcongestion  U‾−i  ,\Psi_{\text{eff}} \;=\; \frac{\Psi_{\text{raw}}(U_{\text{tot}})}{\,1 \;+\; \eta_{\text{congestion}}\;\overline{U}_{-i}\,}\,,$
@@ -79,7 +82,18 @@ Each firm has a limited **screening/evaluation capacity** per period, denoted $\
 
 The **raw screening capacity** $\Psi_{\text{raw}}(U_{\text{tot}})$ represents the firm’s own capacity absent external congestion. The code offers two functional forms:
 
-- **Logistic (S-shaped) capacity:** By default, $\Psi_{\text{raw}}$ follows a logistic function that saturates at a maximum $\psi_{\max}$. Specifically:$Ψraw(Utot)=ψ0+1+exp[−κ(Utot−U∗)]ψmax−ψ0.$
+- **Logistic (S-shaped) capacity:** By default, $\Psi_{\text{raw}}$ follows a logistic function that saturates at a maximum $\psi_{\max}$. 
+
+Specifically:
+
+$$
+\Psi_{\text{raw}}(U_{\text{tot}})
+=
+\psi_0
++
+\frac{\psi_{\max}-\psi_0}
+     {1 + \exp\!\bigl[-\kappa\,(U_{\text{tot}}-U^\*)\bigr]}
+$$
     
     $Ψraw(Utot)  =  ψ0  +  ψmax⁡−ψ0 1+exp⁡[−κ (Utot−U∗)]  .\Psi_{\text{raw}}(U_{\text{tot}}) \;=\; \psi_0 \;+\; \frac{\psi_{\max}-\psi_0}{\,1 + \exp[-\kappa\,(U_{\text{tot}} - U^*)]\,}\,.$
     
@@ -87,9 +101,19 @@ The **raw screening capacity** $\Psi_{\text{raw}}(U_{\text{tot}})$ represents th
     
 - **Inverted-U capacity:** Alternatively, $\Psi_{\text{raw}}$ can be set to rise and then *decline* if $U_{\text{tot}}$ exceeds an optimal level (bureaucratic bloat). The code provides an inverted-U curve: $Ψraw(Utot)=ψ0+(ψmax−ψ0)(U∗Utot)exp(1−U∗Utot),$
     
-    $Ψraw(Utot)  =  ψ0  +  (ψmax⁡−ψ0) (UtotU∗)exp⁡ ⁣(1−UtotU∗) ⁣,\Psi_{\text{raw}}(U_{\text{tot}}) \;=\; \psi_0 \;+\; (\psi_{\max}-\psi_0)\,\Big(\frac{U_{\text{tot}}}{U^*}\Big)\exp\!\Big(1 - \frac{U_{\text{tot}}}{U^*}\Big)\!,$
-    
-    which peaks at $$U_{\text{tot}}=U^*$$ and then declines. This option (selected by `psi_shape: "inv_u"`) reflects *over-investment inefficiency*: beyond a point, extra evaluators may slow the process (too many cooks in the kitchen).
+$$
+\Psi_{\text{raw}}(U_{\text{tot}})
+=
+\psi_0
++
+(\psi_{\max}-\psi_0)
+\left(\frac{U_{\text{tot}}}{U^\*}\right)
+\exp\!\left(
+      1-\frac{U_{\text{tot}}}{U^\*}
+\right)
+$$
+
+which peaks at $$U_{\text{tot}}=U^*$$ and then declines. This option (selected by `psi_shape: "inv_u"`) reflects *over-investment inefficiency*: beyond a point, extra evaluators may slow the process (too many cooks in the kitchen).
     
 
 Given $$U_{\text{tot}}$$ and chosen $\Psi_{\text{raw}}$ form, the effective capacity is finalized by applying the congestion factor as above. In summary, $$\Psi_{\text{eff}}$$ grows with a firm’s own evaluation capital but faces diminishing returns and is *dampened by rivals’ capacity*.
