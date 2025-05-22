@@ -31,9 +31,7 @@ Thus, greater AI/R&D capital yields more ideas on average.
 
 Each new idea has an uncertain quality or payoff $vvv$. We assume a Bayesian setup: prior belief $v∼N(μprior, τ2)v \sim N(\mu_{\text{prior}},\,\tau^2)v∼N(μprior,τ2)$ and observation s=v+εs = v + \varepsilons=v+ε with $noise ε∼N(0, σ2)\varepsilon \sim N(0,\,\sigma^2)ε∼N(0,σ2)$. 
 
-The **prior mean** $μprior\mu_{\text{prior}}μprior$ represents current knowledge; critically, it can be raised by **knowledge spillovers** from other firms.
-
-If \(\overline{U}_{\text{nf},-i}\) denotes the average *non-fungible* evaluator capital of all other firms (see \(U_{\text{nf}}\) below), the model raises firm \(i\)’s prior mean by a spillover term \(\Omega\):
+The **prior mean** $μprior\mu_{\text{prior}}μprior$ represents current knowledge; critically, it can be raised by **knowledge spillovers** from other firms. If $\overline{U}_{\text{nf},-i}$ denotes the average *non-fungible* evaluator capital of all other firms (more on $U_{\text{nf}}$ below), the model increases firm $iii$’s prior mean by an externality term $Ω$:
 
 $$
 \mu_{\text{prior},i} \;=\; \mu_{\text{prior},i}^{(0)} \;+\; \Omega\,\overline{U}_{\text{nf},-i}.
@@ -85,18 +83,9 @@ Then the *effective* throughput $\Psi_{\text{eff}}$ is given by:
 
 The **raw screening capacity** $\Psi_{\text{raw}}(U_{\text{tot}})$ represents the firm’s own capacity absent external congestion. The code offers two functional forms:
 
-- **Logistic (S-shaped) capacity:** By default, $\Psi_{\text{raw}}$ follows a logistic function that saturates at a maximum $\psi_{\max}$. 
+- **Logistic (S-shaped) capacity:** By default, $\Psi_{\text{raw}}$ follows a logistic function that saturates at a maximum $\psi_{\max}$. Specifically:
 
-Specifically:
-
-$$
-\Psi_{\text{raw}}(U_{\text{tot}})
-=
-\psi_0
-+
-\frac{\psi_{\max}-\psi_0}
-     {1 + \exp\!\bigl[-\kappa\,(U_{\text{tot}}-U^\*)\bigr]}
-$$
+$Ψraw(Utot)=ψ0+1+exp[−κ(Utot−U∗)]ψmax−ψ0.$
     
     $Ψraw(Utot)  =  ψ0  +  ψmax⁡−ψ0 1+exp⁡[−κ (Utot−U∗)]  .\Psi_{\text{raw}}(U_{\text{tot}}) \;=\; \psi_0 \;+\; \frac{\psi_{\max}-\psi_0}{\,1 + \exp[-\kappa\,(U_{\text{tot}} - U^*)]\,}\,.$
     
@@ -104,19 +93,9 @@ $$
     
 - **Inverted-U capacity:** Alternatively, $\Psi_{\text{raw}}$ can be set to rise and then *decline* if $U_{\text{tot}}$ exceeds an optimal level (bureaucratic bloat). The code provides an inverted-U curve: $Ψraw(Utot)=ψ0+(ψmax−ψ0)(U∗Utot)exp(1−U∗Utot),$
     
-$$
-\Psi_{\text{raw}}(U_{\text{tot}})
-=
-\psi_0
-+
-(\psi_{\max}-\psi_0)
-\left(\frac{U_{\text{tot}}}{U^\*}\right)
-\exp\!\left(
-      1-\frac{U_{\text{tot}}}{U^\*}
-\right)
-$$
-
-which peaks at $$U_{\text{tot}}=U^*$$ and then declines. This option (selected by `psi_shape: "inv_u"`) reflects *over-investment inefficiency*: beyond a point, extra evaluators may slow the process (too many cooks in the kitchen).
+    $Ψraw(Utot)  =  ψ0  +  (ψmax⁡−ψ0) (UtotU∗)exp⁡ ⁣(1−UtotU∗) ⁣,\Psi_{\text{raw}}(U_{\text{tot}}) \;=\; \psi_0 \;+\; (\psi_{\max}-\psi_0)\,\Big(\frac{U_{\text{tot}}}{U^*}\Big)\exp\!\Big(1 - \frac{U_{\text{tot}}}{U^*}\Big)\!,$
+    
+    which peaks at $$U_{\text{tot}}=U^*$$ and then declines. This option (selected by `psi_shape: "inv_u"`) reflects *over-investment inefficiency*: beyond a point, extra evaluators may slow the process (too many cooks in the kitchen).
     
 
 Given $$U_{\text{tot}}$$ and chosen $\Psi_{\text{raw}}$ form, the effective capacity is finalized by applying the congestion factor as above. In summary, $$\Psi_{\text{eff}}$$ grows with a firm’s own evaluation capital but faces diminishing returns and is *dampened by rivals’ capacity*.
