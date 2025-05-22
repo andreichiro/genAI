@@ -33,10 +33,7 @@ Thus, greater AI/R&D capital yields more ideas on average.
 
 Each new idea has an uncertain quality or payoff $vvv$. We assume a Bayesian setup: prior belief $v∼N(μprior, τ2)v \sim N(\mu_{\text{prior}},\,\tau^2)v∼N(μprior,τ2)$ and observation s=v+εs = v + \varepsilons=v+ε with $noise ε∼N(0, σ2)\varepsilon \sim N(0,\,\sigma^2)ε∼N(0,σ2)$. 
 
-The **prior mean** $μprior\mu_{\text{prior}}μprior$ represents current knowledge; critically, it can be raised by **knowledge spillovers** from other firms. If $U‾nf$,
-$\overline{U}_{\text{nf},-i}$
-
-denotes the average *non-fungible* evaluator capital of all other firms (more on $UnfU_{nf}Unf$ below), the model increases firm $iii$’s prior mean by an externality term $Ω$:
+The **prior mean** $μprior\mu_{\text{prior}}μprior$ represents current knowledge; critically, it can be raised by **knowledge spillovers** from other firms. If $\overline{U}_{\text{nf},-i}$ denotes the average *non-fungible* evaluator capital of all other firms (more on $U_{\text{nf}}$ below), the model increases firm $iii$’s prior mean by an externality term $Ω$:
 
 $Ω  =  $$\mu_{\text{prior},i}
 \;=\;
