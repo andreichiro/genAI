@@ -56,7 +56,7 @@ where $λexplore\lambda_{\text{explore}}λexplore$ is a configurable weight ($λ
 
 The firm then **filters ideas** using a threshold on $T$. The threshold can be an absolute cutoff or a percentile of the scores. By default, the repository uses a percentile rule (e.g., keep the top X% of ideas). Ideas with $T$ below the threshold are discarded immediately (triage reject), saving evaluation capacity for better opportunities. The fraction of ideas that pass triage is recorded as *triage efficiency* (for instance, a triage efficiency of 0.3 means 30% of incoming ideas survived triage).
 
-Accepted ideas (with their updated $(\mu_{\text{post}}, \sigma^2_{\text{post}})$) are **enqueued in a FIFO queue** for detailed screening. Each queue entry carries the arrival time and posterior stats of an idea.
+Accepted ideas (with their updated $(\mu_{\text{post}},\;\sigma_{\text{post}}^{2})$) are enqueued in a FIFO queue for detailed screening. Each queue entry carries the arrival time and posterior stats of an idea.
 
 ### Screening Capacity and Congestion
 
