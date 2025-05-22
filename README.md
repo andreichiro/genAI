@@ -158,31 +158,9 @@ After production, firms update their stocks of evaluation capital and skill for 
     Thus, every idea evaluated increases the skill stock. This captures cumulative experience gains: if a firm evaluates more ideas, its evaluators become more effective over time. The term is linear in $\Psi_{\text{eff}}$ here (for simplicity), but the code is structured to allow more complex concave learning rules if needed.
     
 - **Education Pipeline (New Talent):** The model can exogenously inject new evaluator talent via a training pipeline. If configured (education_lag > 0), an economy-wide **trainee stock** $$S(t)$$ is tracked. Each period, a fraction of trainees *enroll* into training and after a fixed lag they *graduate* as new evaluators. Specifically, each period:
-    - Graduates: $G
-    t
-    
-    =pipeline
-    t−ℓ$
-    - New enrollment: $E
-    t
-    
-    =enroll_rateS
-    t−1
-    
-    +enroll_const$
-    - Trainee stock updates: $S
-    t
-    
-    =(1−retire_rate)(S
-    t−1
-    
-    −G
-    t
-    
-    +E
-    t
-    
-    )$
+    - Graduates: $Gt=pipeline t−ℓ$
+    - New enrollment: $Et=enroll_rateS t−1+enroll_const$
+    - Trainee stock updates: $St=(1−retire_rate)(St−1−Gt+Et)$
     
     The new graduates $G$ are then split equally among firms, *each firm’s* $U_{nf}$ increases by $G/\text{(number of firms)}$. This models an influx of fresh evaluators entering the industry and being hired evenly by firms. (In reality firms could compete for graduates, but here they share equally for simplicity.) By adjusting `education_lag`, `enroll_rate`, etc., the user can simulate scenarios with constrained or expanded future talent supply.
     
