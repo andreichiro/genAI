@@ -33,8 +33,9 @@ Each new idea has an uncertain quality or payoff $vvv$. We assume a Bayesian set
 
 The **prior mean** $μprior\mu_{\text{prior}}μprior$ represents current knowledge; critically, it can be raised by **knowledge spillovers** from other firms.
 
-
-If $\overline{U}_{\text{nf},-i}$ denotes the average *non-fungible* evaluator capital of all other firms (more on $U_{\text{nf}}$ below), the model increases firm $i$’s prior mean by an externality term $\Omega$:
+If $\overline{U}_{\text{nf},-i}$ denotes the average **non-fungible** evaluator
+capital of all other firms (see $U_{\text{nf}}$ below), the model increases
+firm $i$’s prior mean by an externality term $\Omega$:
 
 $$
 \mu_{\text{prior},i}
