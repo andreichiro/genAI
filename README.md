@@ -72,7 +72,12 @@ Each firm has a limited **screening/evaluation capacity** per period, denoted $\
     
 - **Congestion Externality:** If many firms have high evaluation capacity, they may face an **industry-wide congestion** in evaluating ideas (e.g. overlapping searches, competition for the “easy” ideas). The model captures this by reducing each firm’s effective throughput when rivals are strong. 
 
-Let $\overline{U}_{-i}$ be the mean $U_{\text{tot}}$ of the other firms.
+Let 
+
+$\overline{U}_{-i}$ be the mean $U_{\text{tot}}$ 
+
+of the other firms.
+
 Then the *effective* throughput $\Psi_{\text{eff}}$ is given by:
 - $Ψeff=1+ηcongestionU−iΨraw(Utot)$,
     
